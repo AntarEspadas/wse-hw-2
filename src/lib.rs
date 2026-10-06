@@ -1,11 +1,12 @@
 use crossbeam_channel::{Receiver, Sender};
+use std::collections::{HashMap, LinkedList};
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::iter;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::data::{InMessage, Index, MessageData, OutMessage, TermCounter};
+use crate::data::{InMessage, Index, Lexicon, MessageData, OutMessage, OwnedIndex, TermCounter};
 
 pub mod data;
 
@@ -18,13 +19,7 @@ pub fn term(token: &str) -> String {
     t
 }
 
-pub fn write_index_plaintext(
-    index: &Index,
-    out_folder: &str,
-    index_num: usize,
-) -> Result<(), Box<dyn Error>> {
-    let filename = format!("index-{index_num}.txt");
-    let out_path: PathBuf = [out_folder, &filename].iter().collect();
+pub fn write_index_plaintext(index: &Index, out_path: &Path) -> Result<(), Box<dyn Error>> {
     println!("Writing index of size {} to {out_path:?}", index.len());
 
     let mut index_vec: Vec<_> = index.iter().collect();
@@ -39,11 +34,73 @@ pub fn write_index_plaintext(
     let mut writer = BufWriter::new(file);
 
     for (term, postings) in index_vec.into_iter() {
-        write!(writer, "{term}")?;
+        write!(writer, "{term};{};", postings.len())?;
         for (doc_id, count) in postings {
             write!(writer, " {} {}", doc_id, count)?;
         }
         writeln!(writer)?;
+    }
+
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn write_index_bin(index: &Index, out_path: &Path) -> Result<(), Box<dyn Error>> {
+    println!("Writing index of size {} to {out_path:?}", index.len());
+
+    let mut index_vec: Vec<_> = index.iter().collect();
+
+    index_vec.sort_unstable_by_key(|x| x.0);
+
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(out_path)?;
+    let mut writer = BufWriter::new(file);
+
+    for (term, postings) in index_vec.into_iter() {
+        write!(writer, "{term}\0")?;
+        let len = postings.len() as u32;
+        writer.write_all(&len.to_be_bytes())?;
+        for (doc_id, count) in postings {
+            writer.write_all(&doc_id.to_be_bytes())?;
+            writer.write_all(&count.to_be_bytes())?;
+        }
+    }
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn write_lexicon_plaintext(lexicon: &Lexicon, out_path: &Path) -> Result<(), Box<dyn Error>> {
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(out_path)?;
+
+    let mut writer = BufWriter::new(file);
+
+    for (term, term_id) in lexicon.iter() {
+        writeln!(writer, "{term};{term_id}")?;
+    }
+
+    writer.flush()?;
+    Ok(())
+}
+
+pub fn write_lexicon_bin(lexicon: &Lexicon, out_path: &Path) -> Result<(), Box<dyn Error>> {
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(out_path)?;
+
+    let mut writer = BufWriter::new(file);
+
+    for (term, term_id) in lexicon.iter() {
+        write!(writer, "{term}\0")?;
+        writer.write_all(&term_id.to_be_bytes())?;
     }
 
     writer.flush()?;
@@ -71,12 +128,12 @@ pub fn worker(rx: &Receiver<InMessage>, tx: &Sender<OutMessage>) -> Result<(), B
 fn process_buffer(
     buffer: &[u8],
     term_counter: &mut TermCounter,
-    index: &mut Index,
+    index: &mut OwnedIndex,
 ) -> Result<(), Box<dyn Error>> {
     for line in str::from_utf8(buffer)?.lines() {
         let mut iterator = line.split('\t');
         let doc_id = iterator.next().unwrap();
-        let doc_id: usize = doc_id.parse()?;
+        let doc_id: u32 = doc_id.parse()?;
 
         let content = iterator.next().unwrap();
 
@@ -91,8 +148,8 @@ fn process_buffer(
             let entry = index.entry(term);
 
             entry
-                .and_modify(|postings| postings.push((doc_id, count)))
-                .or_insert_with(|| vec![(doc_id, count)]);
+                .and_modify(|postings| postings.push_back((doc_id, count)))
+                .or_insert_with(|| LinkedList::from([(doc_id, count)]));
         }
     }
 
@@ -106,6 +163,7 @@ pub fn produce_from_csv(
     chunk_size: usize,
     workers: usize,
     out_folder: &str,
+    lexicon: &Lexicon,
 ) -> Result<(), Box<dyn Error>> {
     let file = File::open(csv_path)?;
 
@@ -115,12 +173,12 @@ pub fn produce_from_csv(
 
     let mut messages: Vec<_> = iter::repeat_with(|| MessageData {
         buffer: Vec::with_capacity(buffer_size),
-        index: Index::new(),
+        index: OwnedIndex::new(),
     })
     .take(workers)
     .collect();
 
-    let mut index = Index::new();
+    let mut index: HashMap<&str, LinkedList<(u32, u32)>> = HashMap::new();
 
     for i in 0.. {
         let mut read = 0;
@@ -128,7 +186,7 @@ pub fn produce_from_csv(
             println!("Reading {buffer_size} bytes for worker {w}...");
             message.buffer.clear();
             read += read_lines_into_buffer(&mut reader, &mut message.buffer, buffer_size)?;
-            println!("Done reading {buffer_size} bytes for worker {w}");
+            println!("Done reading {} bytes for worker {w}", message.buffer.len());
 
             tx.send(InMessage::Data(message))?;
         }
@@ -144,7 +202,7 @@ pub fn produce_from_csv(
 
             let data = match message {
                 OutMessage::Data(mut data) => {
-                    merge_index_into(&mut data.index, &mut index);
+                    consume_index(&mut data.index, &mut index, lexicon);
                     data
                 }
                 OutMessage::Error(data) => {
@@ -157,7 +215,12 @@ pub fn produce_from_csv(
         }
 
         println!("Iteration {i}: indexed {} terms", index.len());
-        write_index_plaintext(&index, out_folder, i)?;
+        let mut filename = format!("index-{i}");
+        let out_path: PathBuf = [out_folder, &filename].iter().collect();
+        filename.push_str(".txt");
+        let out_path_txt: PathBuf = [out_folder, &filename].iter().collect();
+        write_index_plaintext(&index, &out_path_txt)?;
+        write_index_bin(&index, &out_path)?;
     }
 
     for _ in 0..workers {
@@ -167,8 +230,9 @@ pub fn produce_from_csv(
     Ok(())
 }
 
-fn merge_index_into(source: &mut Index, dest: &mut Index) {
+fn consume_index<'a>(source: &mut OwnedIndex, dest: &mut Index<'a>, lexicon: &'a Lexicon) {
     for (term, source_postings) in source.drain() {
+        let term = lexicon.add(term);
         dest.entry(term)
             .and_modify(|dest_postings| dest_postings.extend(source_postings.iter()))
             .or_insert(source_postings);
