@@ -1,4 +1,30 @@
-use std::collections::{HashMap, hash_map::Iter};
+use std::collections::{
+    HashMap,
+    hash_map::{Drain, Iter},
+};
+
+pub type Index = HashMap<String, Vec<(usize, usize)>>;
+
+pub struct MessageData {
+    pub buffer: Vec<u8>,
+    pub index: Index,
+}
+
+pub enum InMessage {
+    Data(MessageData),
+    Done,
+}
+
+pub enum OutMessage {
+    Data(MessageData),
+    Error(MessageData),
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct Document {
+    pub id: usize,
+    pub content: String,
+}
 
 pub struct TermCounter {
     term_counts: HashMap<String, usize>,
@@ -22,6 +48,10 @@ impl TermCounter {
 
     pub fn clear(&mut self) {
         self.term_counts.clear();
+    }
+
+    pub fn drain(&mut self) -> Drain<'_, String, usize> {
+        self.term_counts.drain()
     }
 }
 
