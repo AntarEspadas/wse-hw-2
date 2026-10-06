@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::iter;
 use std::path::PathBuf;
 
-use crate::data::{Document, InMessage, Index, MessageData, OutMessage, TermCounter};
+use crate::data::{InMessage, Index, MessageData, OutMessage, TermCounter};
 
 pub mod data;
 
@@ -69,19 +69,18 @@ pub fn worker(rx: &Receiver<InMessage>, tx: &Sender<OutMessage>) -> Result<(), B
 }
 
 fn process_buffer(
-    buffer: &Vec<u8>,
+    buffer: &[u8],
     term_counter: &mut TermCounter,
     index: &mut Index,
 ) -> Result<(), Box<dyn Error>> {
-    let mut csv_reader = csv::ReaderBuilder::new()
-        .has_headers(false)
-        .delimiter(b'\t')
-        .from_reader(buffer.as_slice());
+    for line in str::from_utf8(buffer)?.lines() {
+        let mut iterator = line.split('\t');
+        let doc_id = iterator.next().unwrap();
+        let doc_id: usize = doc_id.parse()?;
 
-    for result in csv_reader.deserialize() {
-        let document: Document = result?;
+        let content = iterator.next().unwrap();
 
-        for token in document.content.split_whitespace() {
+        for token in content.split_whitespace() {
             let t = term(token);
             if !t.is_empty() {
                 term_counter.count(t);
@@ -92,8 +91,8 @@ fn process_buffer(
             let entry = index.entry(term);
 
             entry
-                .and_modify(|postings| postings.push((document.id, count)))
-                .or_insert_with(|| vec![(document.id, count)]);
+                .and_modify(|postings| postings.push((doc_id, count)))
+                .or_insert_with(|| vec![(doc_id, count)]);
         }
     }
 

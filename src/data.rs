@@ -20,12 +20,6 @@ pub enum OutMessage {
     Error(MessageData),
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct Document {
-    pub id: usize,
-    pub content: String,
-}
-
 pub struct TermCounter {
     term_counts: HashMap<String, usize>,
 }
