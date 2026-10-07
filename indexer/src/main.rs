@@ -22,8 +22,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Channel to send data out from the workers
     let (out_tx, out_rx) = bounded::<OutMessage>(args.workers);
     std::thread::scope(|scope| {
-        for _ in 0..args.workers {
-            scope.spawn(|| worker(&in_rx, &out_tx).unwrap());
+        for i in 0..args.workers {
+            let in_rx = &in_rx;
+            let out_tx = &out_tx;
+            scope.spawn(move || worker(in_rx, out_tx, i).unwrap());
         }
 
         let lexicon = Lexicon::new();
@@ -39,7 +41,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
         .unwrap();
 
-        println!("Writing lexicon...");
+        println!(
+            "Writing lexicon with {} terms (capacity: {})...",
+            lexicon.len(),
+            lexicon.capacity()
+        );
         let out_path = args.out.join("lexicon.txt");
         write_lexicon_plaintext(&lexicon, &out_path).unwrap();
         let out_path = args.out.join("lexicon.bin");

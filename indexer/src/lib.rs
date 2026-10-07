@@ -108,14 +108,21 @@ pub fn write_lexicon_bin(lexicon: &Lexicon, out_path: &Path) -> Result<(), Box<d
     Ok(())
 }
 
-pub fn worker(rx: &Receiver<InMessage>, tx: &Sender<OutMessage>) -> Result<(), Box<dyn Error>> {
+pub fn worker(
+    rx: &Receiver<InMessage>,
+    tx: &Sender<OutMessage>,
+    worker_id: usize,
+) -> Result<(), Box<dyn Error>> {
+    println!("[{worker_id}] Starting worker...");
     let mut term_counter = TermCounter::new();
     loop {
         let message = rx.recv()?;
         match message {
             InMessage::Data(mut data) => {
+                println!("[{worker_id}] Start processing data...");
                 data.index.clear();
                 let result = process_buffer(&data.buffer, &mut term_counter, &mut data.index);
+                println!("[{worker_id}] Done processing data");
                 match result {
                     Ok(()) => tx.send(OutMessage::Data(data))?,
                     Err(_) => tx.send(OutMessage::Error(data))?,
@@ -199,16 +206,17 @@ pub fn produce_from_csv(
 
         index.clear();
 
-        for w in 0..workers {
+        for i in 0..workers {
             let message = rx.recv()?;
 
+            println!("Merging {}/{} indices...", i + 1, workers);
             let data = match message {
                 OutMessage::Data(mut data) => {
                     consume_index(&mut data.index, &mut index, lexicon);
                     data
                 }
                 OutMessage::Error(data) => {
-                    println!("ERROR in worker {w}");
+                    println!("ERROR");
                     data
                 }
             };
@@ -216,7 +224,12 @@ pub fn produce_from_csv(
             messages.push(data);
         }
 
-        println!("Iteration {i}: indexed {} terms", index.len());
+        println!("Done merging indices");
+        println!(
+            "Iteration {i}: indexed {} terms (index capacity: {})",
+            index.len(),
+            index.capacity()
+        );
         let mut filename = format!("index-{i}");
         let out_path = out_folder.join(&filename);
         filename.push_str(".txt");

@@ -103,6 +103,21 @@ impl Lexicon {
         }
     }
 
+    pub fn len(&self) -> usize {
+        let inner = unsafe { &*self.inner.get() };
+        inner.dict.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let inner = unsafe { &*self.inner.get() };
+        inner.dict.is_empty()
+    }
+
+    pub fn capacity(&self) -> usize {
+        let inner = unsafe { &*self.inner.get() };
+        inner.dict.capacity()
+    }
+
     pub fn iter(&self) -> Iter<'_, String, u32> {
         unsafe {
             let inner = &*self.inner.get();
