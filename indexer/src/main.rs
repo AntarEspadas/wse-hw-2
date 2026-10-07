@@ -1,16 +1,16 @@
 use clap::Parser;
 use crossbeam_channel::bounded;
+use indexer::data::Lexicon;
+use indexer::data::OutMessage;
+use indexer::write_lexicon_bin;
+use indexer::write_lexicon_plaintext;
 use std::error::Error;
 use std::println;
-use wse_hw_2::data::Lexicon;
-use wse_hw_2::data::OutMessage;
-use wse_hw_2::write_lexicon_bin;
-use wse_hw_2::write_lexicon_plaintext;
 
-use wse_hw_2::cli::step_1::Args;
-use wse_hw_2::data::InMessage;
-use wse_hw_2::produce_from_csv;
-use wse_hw_2::worker;
+use indexer::cli::Args;
+use indexer::data::InMessage;
+use indexer::produce_from_csv;
+use indexer::worker;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();

@@ -3,7 +3,7 @@ use std::collections::{HashMap, LinkedList};
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{iter, println};
 
 use crate::data::{InMessage, Index, Lexicon, MessageData, OutMessage, OwnedIndex, TermCounter};
