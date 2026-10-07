@@ -1,12 +1,14 @@
 use crossbeam_channel::{Receiver, Sender};
-use std::collections::{HashMap, LinkedList};
+use std::collections::LinkedList;
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
-use std::{iter, println};
+use std::{iter, println, vec};
 
-use crate::data::{InMessage, Index, Lexicon, MessageData, OutMessage, OwnedIndex, TermCounter};
+use crate::data::{
+    InMessage, IndexMessage, Lexicon, MergeMessage, OutMessage, OwnedIndex, TermCounter,
+};
 
 pub mod cli;
 pub mod data;
@@ -20,7 +22,7 @@ pub fn term(token: &str) -> String {
     t
 }
 
-pub fn write_index_plaintext(index: &Index, out_path: &Path) -> Result<(), Box<dyn Error>> {
+pub fn write_index_plaintext(index: &OwnedIndex, out_path: &Path) -> Result<(), Box<dyn Error>> {
     println!("Writing index of size {} to {out_path:?}", index.len());
 
     let mut index_vec: Vec<_> = index.iter().collect();
@@ -46,7 +48,7 @@ pub fn write_index_plaintext(index: &Index, out_path: &Path) -> Result<(), Box<d
     Ok(())
 }
 
-pub fn write_index_bin(index: &Index, out_path: &Path) -> Result<(), Box<dyn Error>> {
+pub fn write_index_bin(index: &OwnedIndex, out_path: &Path) -> Result<(), Box<dyn Error>> {
     println!("Writing index of size {} to {out_path:?}", index.len());
 
     let mut index_vec: Vec<_> = index.iter().collect();
@@ -118,15 +120,21 @@ pub fn worker(
     loop {
         let message = rx.recv()?;
         match message {
-            InMessage::Data(mut data) => {
+            InMessage::Index(mut data) => {
                 println!("[{worker_id}] Start processing data...");
                 data.index.clear();
                 let result = process_buffer(&data.buffer, &mut term_counter, &mut data.index);
                 println!("[{worker_id}] Done processing data");
                 match result {
-                    Ok(()) => tx.send(OutMessage::Data(data))?,
-                    Err(_) => tx.send(OutMessage::Error(data))?,
+                    Ok(()) => tx.send(OutMessage::IndexDone(data))?,
+                    Err(_) => tx.send(OutMessage::IndexError(data))?,
                 };
+            }
+            InMessage::Merge(mut data) => {
+                println!("[{worker_id}] Merging indices...");
+                merge_indeces(&mut data.src, &mut data.dest);
+                println!("[{worker_id}] Done merging indices");
+                tx.send(OutMessage::MergeDone(data))?;
             }
             InMessage::Done => return Ok(()),
         }
@@ -164,6 +172,14 @@ fn process_buffer(
     Ok(())
 }
 
+fn merge_indeces(src: &mut OwnedIndex, dest: &mut OwnedIndex) {
+    for (term, mut postings) in src.drain() {
+        dest.entry(term)
+            .and_modify(|p| p.append(&mut postings))
+            .or_insert_with(|| postings);
+    }
+}
+
 pub fn produce_from_csv(
     tx: &Sender<InMessage>,
     rx: &Receiver<OutMessage>,
@@ -180,50 +196,73 @@ pub fn produce_from_csv(
 
     let mut reader = BufReader::new(file);
 
-    let mut messages: Vec<_> = iter::repeat_with(|| MessageData {
-        buffer: Vec::with_capacity(buffer_size),
-        index: OwnedIndex::new(),
-    })
-    .take(workers)
-    .collect();
-
-    let mut index: HashMap<&str, LinkedList<(u32, u32)>> = HashMap::new();
+    let mut buffers: Vec<_> = iter::repeat_with(|| Vec::with_capacity(buffer_size))
+        .take(workers)
+        .collect();
+    let mut indices = vec![OwnedIndex::new(); workers];
 
     for i in 0.. {
         let mut read = 0;
-        for (w, mut message) in messages.drain(..).enumerate() {
+        for (w, (mut buffer, index)) in buffers.drain(..).zip(indices.drain(..)).enumerate() {
             println!("Reading {buffer_size} bytes for worker {w}...");
-            message.buffer.clear();
-            read += read_lines_into_buffer(&mut reader, &mut message.buffer, buffer_size)?;
-            println!("Done reading {} bytes for worker {w}", message.buffer.len());
+            buffer.clear();
+            read += read_lines_into_buffer(&mut reader, &mut buffer, buffer_size)?;
+            println!("Done reading {} bytes for worker {w}", buffer.len());
 
-            tx.send(InMessage::Data(message))?;
+            tx.send(InMessage::Index(IndexMessage { buffer, index }))?;
         }
 
         if read == 0 {
             break;
         }
 
-        index.clear();
+        let mut running_jobs = workers;
+        let mut last_done_index: Option<OwnedIndex> = None;
 
-        for i in 0..workers {
+        while running_jobs > 0 {
             let message = rx.recv()?;
 
-            println!("Merging {}/{} indices...", i + 1, workers);
-            let data = match message {
-                OutMessage::Data(mut data) => {
-                    consume_index(&mut data.index, &mut index, lexicon);
-                    data
+            running_jobs -= 1;
+
+            println!("Running jobs: {running_jobs}");
+            match message {
+                OutMessage::IndexDone(data) => {
+                    buffers.push(data.buffer);
+
+                    if let Some(index) = last_done_index {
+                        tx.send(InMessage::Merge(MergeMessage {
+                            src: index,
+                            dest: data.index,
+                        }))?;
+                        last_done_index = None;
+                        running_jobs += 1;
+                    } else {
+                        last_done_index = Some(data.index);
+                    }
                 }
-                OutMessage::Error(data) => {
+                OutMessage::MergeDone(data) => {
+                    indices.push(data.src);
+
+                    if let Some(index) = last_done_index {
+                        tx.send(InMessage::Merge(MergeMessage {
+                            src: index,
+                            dest: data.dest,
+                        }))?;
+                        last_done_index = None;
+                        running_jobs += 1;
+                    } else {
+                        last_done_index = Some(data.dest);
+                    }
+                }
+                OutMessage::IndexError(data) => {
+                    indices.push(data.index);
+                    buffers.push(data.buffer);
                     println!("ERROR");
-                    data
                 }
             };
-
-            messages.push(data);
         }
 
+        let mut index = last_done_index.unwrap();
         println!("Done merging indices");
         println!(
             "Iteration {i}: indexed {} terms (index capacity: {})",
@@ -236,6 +275,10 @@ pub fn produce_from_csv(
         let out_path_txt = out_folder.join(&filename);
         write_index_plaintext(&index, &out_path_txt)?;
         write_index_bin(&index, &out_path)?;
+
+        add_to_lexion(&mut index, lexicon);
+
+        indices.push(index);
     }
 
     for _ in 0..workers {
@@ -245,12 +288,9 @@ pub fn produce_from_csv(
     Ok(())
 }
 
-fn consume_index<'a>(source: &mut OwnedIndex, dest: &mut Index<'a>, lexicon: &'a Lexicon) {
-    for (term, source_postings) in source.drain() {
-        let term = lexicon.add(term);
-        dest.entry(term)
-            .and_modify(|dest_postings| dest_postings.extend(source_postings.iter()))
-            .or_insert(source_postings);
+fn add_to_lexion(index: &mut OwnedIndex, lexicon: &Lexicon) {
+    for (term, _) in index.drain() {
+        lexicon.add(term);
     }
 }
 

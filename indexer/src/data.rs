@@ -7,21 +7,27 @@ use std::{
 };
 
 pub type OwnedIndex = HashMap<String, LinkedList<(u32, u32)>>;
-pub type Index<'a> = HashMap<&'a str, LinkedList<(u32, u32)>>;
 
-pub struct MessageData {
+pub struct IndexMessage {
     pub buffer: Vec<u8>,
     pub index: OwnedIndex,
 }
 
+pub struct MergeMessage {
+    pub src: OwnedIndex,
+    pub dest: OwnedIndex,
+}
+
 pub enum InMessage {
-    Data(MessageData),
+    Index(IndexMessage),
+    Merge(MergeMessage),
     Done,
 }
 
 pub enum OutMessage {
-    Data(MessageData),
-    Error(MessageData),
+    IndexDone(IndexMessage),
+    MergeDone(MergeMessage),
+    IndexError(IndexMessage),
 }
 
 pub struct TermCounter {
