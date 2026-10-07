@@ -1,12 +1,12 @@
 use std::{
     cell::UnsafeCell,
     collections::{
-        HashMap, LinkedList,
+        HashMap,
         hash_map::{Drain, Iter},
     },
 };
 
-pub type OwnedIndex = HashMap<String, LinkedList<(u32, u32)>>;
+pub type OwnedIndex = HashMap<String, Vec<(u32, u32)>>;
 
 pub struct IndexMessage {
     pub buffer: Vec<u8>,

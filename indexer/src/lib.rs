@@ -1,5 +1,4 @@
 use crossbeam_channel::{Receiver, Sender};
-use std::collections::LinkedList;
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
@@ -164,8 +163,8 @@ fn process_buffer(
             let entry = index.entry(term);
 
             entry
-                .and_modify(|postings| postings.push_back((doc_id, count)))
-                .or_insert_with(|| LinkedList::from([(doc_id, count)]));
+                .and_modify(|postings| postings.push((doc_id, count)))
+                .or_insert_with(|| vec![(doc_id, count)]);
         }
     }
 
