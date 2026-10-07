@@ -6,6 +6,8 @@ use indexer::write_lexicon_bin;
 use indexer::write_lexicon_plaintext;
 use std::error::Error;
 use std::println;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use indexer::cli::Args;
 use indexer::data::InMessage;
@@ -15,7 +17,7 @@ use indexer::worker;
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    println!("Chunk size: {}", args.chunk_size);
+    let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
     // Channel to send data into the workers
     let (in_tx, in_rx) = bounded::<InMessage>(args.workers);
@@ -51,6 +53,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         let out_path = args.out.join("lexicon.bin");
         write_lexicon_bin(&lexicon, &out_path).unwrap();
     });
+
+    let finish = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+
+    let elapsed = finish - start;
+
+    println!("Took {:?}", elapsed);
 
     Ok(())
 }
