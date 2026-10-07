@@ -3,11 +3,12 @@ use std::collections::{HashMap, LinkedList};
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-use std::iter;
 use std::path::{Path, PathBuf};
+use std::{iter, println};
 
 use crate::data::{InMessage, Index, Lexicon, MessageData, OutMessage, OwnedIndex, TermCounter};
 
+pub mod cli;
 pub mod data;
 
 pub fn term(token: &str) -> String {
@@ -159,14 +160,15 @@ fn process_buffer(
 pub fn produce_from_csv(
     tx: &Sender<InMessage>,
     rx: &Receiver<OutMessage>,
-    csv_path: &str,
+    csv_path: &Path,
     chunk_size: usize,
     workers: usize,
-    out_folder: &str,
+    out_folder: &Path,
     lexicon: &Lexicon,
 ) -> Result<(), Box<dyn Error>> {
     let file = File::open(csv_path)?;
 
+    println!("chunk_size: {chunk_size}, workers: {workers}");
     let buffer_size = chunk_size / workers;
 
     let mut reader = BufReader::new(file);
@@ -216,9 +218,9 @@ pub fn produce_from_csv(
 
         println!("Iteration {i}: indexed {} terms", index.len());
         let mut filename = format!("index-{i}");
-        let out_path: PathBuf = [out_folder, &filename].iter().collect();
+        let out_path = out_folder.join(&filename);
         filename.push_str(".txt");
-        let out_path_txt: PathBuf = [out_folder, &filename].iter().collect();
+        let out_path_txt = out_folder.join(&filename);
         write_index_plaintext(&index, &out_path_txt)?;
         write_index_bin(&index, &out_path)?;
     }
