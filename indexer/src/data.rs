@@ -4,18 +4,22 @@ use std::{
         HashMap,
         hash_map::{Drain, Iter},
     },
+    sync::Arc,
 };
 
-pub type OwnedIndex = HashMap<String, Vec<(u32, u32)>>;
+use dashmap::{DashMap, ReadOnlyView};
+
+pub type Index = DashMap<String, Vec<(u32, u32)>>;
+pub type ReadonlyIndex = ReadOnlyView<String, Vec<(u32, u32)>>;
 
 pub struct IndexMessage {
     pub buffer: Vec<u8>,
-    pub index: OwnedIndex,
+    pub index: Arc<Index>,
 }
 
 pub struct MergeMessage {
-    pub src: OwnedIndex,
-    pub dest: OwnedIndex,
+    pub src: Index,
+    pub dest: Index,
 }
 
 pub enum InMessage {
