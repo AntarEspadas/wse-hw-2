@@ -22,12 +22,15 @@ pub fn term(token: &str) -> String {
     t
 }
 
-pub fn write_index_plaintext(index: &ReadonlyIndex, out_path: &Path) -> Result<(), Box<dyn Error>> {
-    println!("Writing index of size {} to {out_path:?}", index.len());
-
-    let mut index_vec: Vec<_> = index.iter().collect();
-
-    index_vec.sort_unstable_by_key(|x| x.0);
+pub fn write_index_plaintext<I>(sorted_index: I, out_path: &Path) -> Result<(), Box<dyn Error>>
+where
+    I: IntoIterator<Item = (String, (u32, u32))>,
+{
+     sorted_index.
+    println!(
+        "Writing index of size {} to {out_path:?}",
+        sorted_index.size()
+    );
 
     let file = OpenOptions::new()
         .create(true)
@@ -276,12 +279,15 @@ pub fn produce_from_csv(
 
         let readonly_index = Arc::try_unwrap(index).unwrap().into_read_only();
 
+        add_to_lexion(&readonly_index, lexicon);
+
+        let mut index_vec: Vec<_> = readonly_index.into_inner().into_iter().collect();
+
+        index_vec.sort_unstable_by(|x, y| x.0.cmp(&y.0));
+
         write_index_plaintext(&readonly_index, &out_path_txt)?;
         write_index_bin(&readonly_index, &out_path)?;
 
-        add_to_lexion(&readonly_index, lexicon);
-
-        index = Arc::new(readonly_index.into_inner());
         index.clear();
     }
 
