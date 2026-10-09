@@ -2,12 +2,12 @@ use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
-use std::{iter, println, thread, vec};
+use std::{iter, println, thread};
 
 use dashmap::ReadOnlyView;
 use parking_lot::Mutex;
 
-use crate::data::{Index, Lexicon, TermCounter};
+use crate::data::{Index, IndexElement, Lexicon, TermCounter};
 
 pub mod cli;
 pub mod data;
@@ -23,7 +23,7 @@ pub fn term(token: &str) -> String {
 
 pub fn write_index_plaintext<'a, I>(index: I, out_path: &Path) -> Result<(), Box<dyn Error>>
 where
-    I: Iterator<Item = &'a mut Vec<(u32, u32)>>,
+    I: Iterator<Item = &'a mut IndexElement>,
 {
     println!(
         "Writing index of size {} to {out_path:?}",
@@ -37,7 +37,7 @@ where
         .open(out_path)?;
     let mut writer = BufWriter::new(file);
 
-    for (term_id, postings) in index.enumerate() {
+    for (term_id, postings) in index.flat_map(|x| x.get_mut()).enumerate() {
         write!(writer, "{term_id};{};", postings.len())?;
         for (doc_id, count) in postings {
             write!(writer, " {} {}", doc_id, count)?;
@@ -51,7 +51,7 @@ where
 
 pub fn write_index_bin<'a, I>(index: I, out_path: &Path) -> Result<(), Box<dyn Error>>
 where
-    I: Iterator<Item = &'a mut Vec<(u32, u32)>>,
+    I: Iterator<Item = &'a mut IndexElement>,
 {
     println!(
         "Writing index of size {} to {out_path:?}",
@@ -65,7 +65,7 @@ where
         .open(out_path)?;
     let mut writer = BufWriter::new(file);
 
-    for (term_id, postings) in index.enumerate() {
+    for (term_id, postings) in index.flat_map(|x| x.get_mut()).enumerate() {
         let term = (term_id as u32).to_be_bytes();
         writer.write_all(&term)?;
 
@@ -150,7 +150,7 @@ pub fn process_buffer(
 
             let mut postings = index[term_id].lock();
 
-            postings.push((doc_id, count));
+            postings.get_or_insert_with(Vec::new).push((doc_id, count));
         }
     }
     println!("[{worker_id}] Done processing data");
@@ -214,19 +214,19 @@ pub fn generate_index(
         });
 
         let readonly_lexicon = lexicon.into_readonly();
-        // let index: Index = iter::repeat_with(|| Mutex::new(Vec::new()))
-        //     .take(readonly_lexicon.len())
-        //     .collect();
+        let index: Index = iter::repeat_with(|| Mutex::new(None))
+            .take(readonly_lexicon.len())
+            .collect();
 
-        // thread::scope(|scope| {
-        //     for (worker_id, buffer) in buffers.iter_mut().enumerate() {
-        //         let index = &index;
-        //         let readonly_lexicon = &readonly_lexicon;
-        //         scope.spawn(move || {
-        //             process_buffer(buffer, index, readonly_lexicon, worker_id).unwrap()
-        //         });
-        //     }
-        // });
+        thread::scope(|scope| {
+            for (worker_id, buffer) in buffers.iter_mut().enumerate() {
+                let index = &index;
+                let readonly_lexicon = &readonly_lexicon;
+                scope.spawn(move || {
+                    process_buffer(buffer, index, readonly_lexicon, worker_id).unwrap()
+                });
+            }
+        });
 
         lexicon = Lexicon::from_readonly(readonly_lexicon);
 
@@ -234,40 +234,28 @@ pub fn generate_index(
             break;
         }
 
-        // println!(
-        //     "Iteration {i}: indexed {} terms (index capacity: {})",
-        //     index.len(),
-        //     index.capacity()
-        // );
+        println!(
+            "Iteration {i}: indexed {} terms (index capacity: {})",
+            index.len(),
+            index.capacity()
+        );
         let mut filename = format!("index-{i}");
         let out_path = out_folder.join(&filename);
         filename.push_str(".txt");
         let out_path_txt = out_folder.join(&filename);
 
-        // let mut index = index;
+        let mut index = index;
 
-        // for postings in index.iter_mut() {
-        //     let postings = postings.get_mut();
-        //     postings.sort_unstable_by_key(|x| x.0);
-        // }
+        for postings in index.iter_mut() {
+            let postings = postings.get_mut();
+            if let Some(postings) = postings {
+                postings.sort_unstable_by_key(|x| x.0);
+            }
+        }
 
-        // let iterator = index
-        //     .iter_mut()
-        //     .map(|x| x.get_mut())
-        //     .filter(|x| !x.is_empty());
+        write_index_plaintext(index.iter_mut(), &out_path_txt)?;
 
-        // write_index_plaintext(iterator, &out_path_txt)?;
-
-        // let iterator = index
-        //     .iter_mut()
-        //     .map(|x| x.get_mut())
-        //     .filter(|x| !x.is_empty());
-
-        // write_index_bin(iterator, &out_path)?;
-
-        println!("Updating lexicon...");
-
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        write_index_bin(index.iter_mut(), &out_path)?;
     }
 
     println!("Writing lexicon...");

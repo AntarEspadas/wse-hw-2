@@ -13,8 +13,8 @@ use parking_lot::Mutex;
 
 use dashmap::{DashMap, ReadOnlyView};
 
-pub type Index = Vec<Mutex<Vec<(u32, u32)>>>;
-pub type ReadonlyIndex = ReadOnlyView<u32, Vec<(u32, u32)>>;
+pub type IndexElement = Mutex<Option<Vec<(u32, u32)>>>;
+pub type Index = Vec<IndexElement>;
 
 pub struct IndexMessage {
     pub buffer: Vec<u8>,
@@ -81,7 +81,7 @@ pub struct Lexicon {
 impl Lexicon {
     pub fn new() -> Self {
         Self {
-            dict: DashMap::with_shard_amount(2),
+            dict: DashMap::new(),
             next_id: AtomicUsize::new(0),
         }
     }
