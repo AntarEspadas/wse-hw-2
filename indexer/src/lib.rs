@@ -12,7 +12,7 @@ use crate::data::{Index, IndexElement, Lexicon, TermCounter};
 pub mod cli;
 pub mod data;
 
-pub fn term(token: &str) -> String {
+fn term(token: &str) -> String {
     let mut t = token.to_lowercase();
 
     // Remove punctuation
@@ -21,7 +21,7 @@ pub fn term(token: &str) -> String {
     t
 }
 
-pub fn write_index_plaintext<'a, I>(index: I, out_path: &Path) -> Result<(), Box<dyn Error>>
+fn write_index_plaintext<'a, I>(index: I, out_path: &Path) -> Result<(), Box<dyn Error>>
 where
     I: Iterator<Item = &'a mut IndexElement>,
 {
@@ -44,7 +44,7 @@ where
     Ok(())
 }
 
-pub fn write_index_bin<'a, I>(index: I, out_path: &Path) -> Result<(), Box<dyn Error>>
+fn write_index_bin<'a, I>(index: I, out_path: &Path) -> Result<(), Box<dyn Error>>
 where
     I: Iterator<Item = &'a mut IndexElement>,
 {
@@ -58,10 +58,6 @@ where
     for (term_id, postings) in index.flat_map(|x| x.get_mut()).enumerate() {
         let term = (term_id as u32).to_be_bytes();
         writer.write_all(&term)?;
-
-        let len = postings.len() as u32;
-        writer.write_all(&len.to_be_bytes())?;
-
         for (doc_id, count) in postings {
             writer.write_all(&doc_id.to_be_bytes())?;
             writer.write_all(&count.to_be_bytes())?;
@@ -71,7 +67,26 @@ where
     Ok(())
 }
 
-pub fn write_lexicon_plaintext<'a, I>(lexicon: I, out_path: &Path) -> Result<(), Box<dyn Error>>
+fn write_lengths<'a, I>(index: I, out_path: &Path) -> Result<(), Box<dyn Error>>
+where
+    I: Iterator<Item = &'a mut IndexElement>,
+{
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(out_path)?;
+    let mut writer = BufWriter::new(file);
+
+    for postings in index.flat_map(|x| x.get_mut()) {
+        let len = postings.len() as u32;
+        writer.write_all(&len.to_be_bytes())?;
+    }
+    writer.flush()?;
+    Ok(())
+}
+
+fn write_lexicon_plaintext<'a, I>(lexicon: I, out_path: &Path) -> Result<(), Box<dyn Error>>
 where
     I: Iterator<Item = (&'a String, &'a usize)>,
 {
@@ -91,7 +106,7 @@ where
     Ok(())
 }
 
-pub fn write_lexicon_bin<'a, I>(lexicon: I, out_path: &Path) -> Result<(), Box<dyn Error>>
+fn write_lexicon_bin<'a, I>(lexicon: I, out_path: &Path) -> Result<(), Box<dyn Error>>
 where
     I: Iterator<Item = (&'a String, &'a usize)>,
 {
@@ -113,7 +128,7 @@ where
     Ok(())
 }
 
-pub fn process_buffer(
+fn process_buffer(
     buffer: &[u8],
     index: &Index,
     lexicon: &ReadOnlyView<String, usize>,
@@ -193,8 +208,12 @@ pub fn generate_index(
                 });
             }
         });
-        println!("Read {chunk_size} bytes of data");
+        println!("Read {read} bytes of data");
         println!("Lexicon size: {}", lexicon.len());
+
+        if read == 0 {
+            break;
+        }
 
         let readonly_lexicon = lexicon.into_readonly();
         let index: Index = iter::repeat_with(|| Mutex::new(None))
@@ -210,10 +229,6 @@ pub fn generate_index(
             }
         });
         lexicon = Lexicon::from_readonly(readonly_lexicon);
-
-        if read == 0 {
-            break;
-        }
 
         println!(
             "Iteration {i}: indexed {} terms (index capacity: {})",
@@ -246,6 +261,11 @@ pub fn generate_index(
             println!("Writing index of size {} to {:?}", index.len(), out_path);
 
             write_index_bin(index.iter_mut(), &out_path)?;
+
+            let filename = format!("lengths-{i}.bin");
+            let out_path = out_folder.join(&filename);
+
+            write_lengths(index.iter_mut(), &out_path)?;
         }
     }
 
@@ -254,12 +274,12 @@ pub fn generate_index(
     let lexicon = lexicon.into_readonly();
 
     if write_txt {
-        let out_path = out_folder.join("lexicon.bin");
-        write_lexicon_bin(lexicon.iter(), &out_path).unwrap();
-    }
-    if write_bin {
         let out_path = out_folder.join("lexicon.txt");
         write_lexicon_plaintext(lexicon.iter(), &out_path).unwrap();
+    }
+    if write_bin {
+        let out_path = out_folder.join("lexicon.bin");
+        write_lexicon_bin(lexicon.iter(), &out_path).unwrap();
     }
 
     Ok(())
