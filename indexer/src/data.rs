@@ -1,16 +1,18 @@
 use std::{
-    cell::UnsafeCell,
     collections::{
         HashMap,
         hash_map::{Drain, Iter},
     },
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 
 use dashmap::{DashMap, ReadOnlyView};
 
-pub type Index = DashMap<String, Vec<(u32, u32)>>;
-pub type ReadonlyIndex = ReadOnlyView<String, Vec<(u32, u32)>>;
+pub type Index = DashMap<u32, Vec<(u32, u32)>>;
+pub type ReadonlyIndex = ReadOnlyView<u32, Vec<(u32, u32)>>;
 
 pub struct IndexMessage {
     pub buffer: Vec<u8>,
@@ -69,70 +71,41 @@ impl Default for TermCounter {
     }
 }
 
-struct LexiconInner {
-    dict: HashMap<String, u32>,
-    next_id: u32,
-}
-
 pub struct Lexicon {
-    inner: UnsafeCell<LexiconInner>,
+    dict: DashMap<String, u32>,
+    next_id: AtomicU32,
 }
 
 impl Lexicon {
     pub fn new() -> Self {
         Self {
-            inner: UnsafeCell::new(LexiconInner {
-                dict: HashMap::new(),
-                next_id: 0,
-            }),
+            dict: DashMap::new(),
+            next_id: AtomicU32::new(0),
         }
     }
 
-    pub fn add(&self, term: String) -> &str {
-        unsafe {
-            let inner = &mut *self.inner.get();
-
-            if let Some((key, _)) = inner.dict.get_key_value(term.as_str()) {
-                let key_ptr: *const str = key.as_str();
-
-                return &*key_ptr;
-            }
-
-            let id = inner.next_id;
-
-            inner.next_id += 1;
-
-            // Point at the allocation owned by `word`.
-            let key_ptr: *const str = term.as_str();
-
-            inner.dict.insert(term, id);
-
-            // Moving the String into the HashMap does not move its
-            // backing allocation.
-            &*key_ptr
-        }
+    pub fn add(&self, term: String) -> u32 {
+        *self
+            .dict
+            .entry(term)
+            .or_insert_with(|| self.next_id.fetch_add(1, Ordering::Relaxed))
+            .value()
     }
 
     pub fn len(&self) -> usize {
-        let inner = unsafe { &*self.inner.get() };
-        inner.dict.len()
+        self.dict.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        let inner = unsafe { &*self.inner.get() };
-        inner.dict.is_empty()
+        self.dict.is_empty()
     }
 
     pub fn capacity(&self) -> usize {
-        let inner = unsafe { &*self.inner.get() };
-        inner.dict.capacity()
+        self.dict.capacity()
     }
 
-    pub fn iter(&self) -> Iter<'_, String, u32> {
-        unsafe {
-            let inner = &*self.inner.get();
-            inner.dict.iter()
-        }
+    pub fn into_readonly(self) -> ReadOnlyView<String, u32> {
+        self.dict.into_read_only()
     }
 }
 

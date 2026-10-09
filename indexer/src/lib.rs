@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::{iter, println, thread, vec};
 
-use crate::data::{Index, Lexicon, ReadonlyIndex, TermCounter};
+use crate::data::{Index, Lexicon, TermCounter};
 
 pub mod cli;
 pub mod data;
@@ -18,12 +18,14 @@ pub fn term(token: &str) -> String {
     t
 }
 
-pub fn write_index_plaintext(index: &ReadonlyIndex, out_path: &Path) -> Result<(), Box<dyn Error>> {
-    println!("Writing index of size {} to {out_path:?}", index.len());
-
-    let mut index_vec: Vec<_> = index.iter().collect();
-
-    index_vec.sort_unstable_by_key(|x| x.0);
+pub fn write_index_plaintext(
+    sorted_index: &[(u32, Vec<(u32, u32)>)],
+    out_path: &Path,
+) -> Result<(), Box<dyn Error>> {
+    println!(
+        "Writing index of size {} to {out_path:?}",
+        sorted_index.len()
+    );
 
     let file = OpenOptions::new()
         .create(true)
@@ -32,7 +34,7 @@ pub fn write_index_plaintext(index: &ReadonlyIndex, out_path: &Path) -> Result<(
         .open(out_path)?;
     let mut writer = BufWriter::new(file);
 
-    for (term, postings) in index_vec.into_iter() {
+    for (term, postings) in sorted_index {
         write!(writer, "{term};{};", postings.len())?;
         for (doc_id, count) in postings {
             write!(writer, " {} {}", doc_id, count)?;
@@ -44,12 +46,14 @@ pub fn write_index_plaintext(index: &ReadonlyIndex, out_path: &Path) -> Result<(
     Ok(())
 }
 
-pub fn write_index_bin(index: &ReadonlyIndex, out_path: &Path) -> Result<(), Box<dyn Error>> {
-    println!("Writing index of size {} to {out_path:?}", index.len());
-
-    let mut index_vec: Vec<_> = index.iter().collect();
-
-    index_vec.sort_unstable_by_key(|x| x.0);
+pub fn write_index_bin(
+    sorted_index: &[(u32, Vec<(u32, u32)>)],
+    out_path: &Path,
+) -> Result<(), Box<dyn Error>> {
+    println!(
+        "Writing index of size {} to {out_path:?}",
+        sorted_index.len()
+    );
 
     let file = OpenOptions::new()
         .create(true)
@@ -58,10 +62,14 @@ pub fn write_index_bin(index: &ReadonlyIndex, out_path: &Path) -> Result<(), Box
         .open(out_path)?;
     let mut writer = BufWriter::new(file);
 
-    for (term, postings) in index_vec.into_iter() {
+    for (term, postings) in sorted_index {
         write!(writer, "{term}\0")?;
+        let term = term.to_be_bytes();
+        writer.write_all(&term)?;
+
         let len = postings.len() as u32;
         writer.write_all(&len.to_be_bytes())?;
+
         for (doc_id, count) in postings {
             writer.write_all(&doc_id.to_be_bytes())?;
             writer.write_all(&count.to_be_bytes())?;
@@ -71,7 +79,10 @@ pub fn write_index_bin(index: &ReadonlyIndex, out_path: &Path) -> Result<(), Box
     Ok(())
 }
 
-pub fn write_lexicon_plaintext(lexicon: &Lexicon, out_path: &Path) -> Result<(), Box<dyn Error>> {
+pub fn write_lexicon_plaintext<'a, I>(lexicon: I, out_path: &Path) -> Result<(), Box<dyn Error>>
+where
+    I: Iterator<Item = (&'a String, &'a u32)>,
+{
     let file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -80,7 +91,7 @@ pub fn write_lexicon_plaintext(lexicon: &Lexicon, out_path: &Path) -> Result<(),
 
     let mut writer = BufWriter::new(file);
 
-    for (term, term_id) in lexicon.iter() {
+    for (term, term_id) in lexicon {
         writeln!(writer, "{term};{term_id}")?;
     }
 
@@ -88,7 +99,10 @@ pub fn write_lexicon_plaintext(lexicon: &Lexicon, out_path: &Path) -> Result<(),
     Ok(())
 }
 
-pub fn write_lexicon_bin(lexicon: &Lexicon, out_path: &Path) -> Result<(), Box<dyn Error>> {
+pub fn write_lexicon_bin<'a, I>(lexicon: I, out_path: &Path) -> Result<(), Box<dyn Error>>
+where
+    I: Iterator<Item = (&'a String, &'a u32)>,
+{
     let file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -97,7 +111,7 @@ pub fn write_lexicon_bin(lexicon: &Lexicon, out_path: &Path) -> Result<(), Box<d
 
     let mut writer = BufWriter::new(file);
 
-    for (term, term_id) in lexicon.iter() {
+    for (term, term_id) in lexicon {
         write!(writer, "{term}\0")?;
         writer.write_all(&term_id.to_be_bytes())?;
     }
@@ -109,6 +123,7 @@ pub fn write_lexicon_bin(lexicon: &Lexicon, out_path: &Path) -> Result<(), Box<d
 pub fn process_buffer(
     buffer: &[u8],
     index: &Index,
+    lexicon: &Lexicon,
     worker_id: usize,
 ) -> Result<(), Box<dyn Error>> {
     println!("[{worker_id}] Start processing data...");
@@ -128,9 +143,10 @@ pub fn process_buffer(
         }
 
         for (term, count) in term_counter.drain() {
-            let entry = index.entry(term);
+            let term_id = lexicon.add(term);
 
-            entry
+            index
+                .entry(term_id)
                 .and_modify(|postings| postings.push((doc_id, count)))
                 .or_insert_with(|| vec![(doc_id, count)]);
         }
@@ -171,7 +187,8 @@ pub fn generate_index(
                 println!("Done reading {} bytes for worker {worker_id}", buffer.len());
 
                 let index = &index;
-                scope.spawn(move || process_buffer(buffer, index, worker_id).unwrap());
+                let lexicon = &lexicon;
+                scope.spawn(move || process_buffer(buffer, index, lexicon, worker_id).unwrap());
             }
         });
 
@@ -189,29 +206,35 @@ pub fn generate_index(
         filename.push_str(".txt");
         let out_path_txt = out_folder.join(&filename);
 
-        let readonly_index = index.into_read_only();
+        let mut sorted_index: Vec<_> = index
+            .into_iter()
+            .map(|mut x| {
+                x.1.sort_unstable_by_key(|a| a.0);
+                x
+            })
+            .collect();
+        sorted_index.sort_unstable_by_key(|x| x.0);
 
-        write_index_plaintext(&readonly_index, &out_path_txt)?;
-        write_index_bin(&readonly_index, &out_path)?;
+        write_index_plaintext(&sorted_index, &out_path_txt)?;
+        write_index_bin(&sorted_index, &out_path)?;
 
-        add_to_lexicon(&readonly_index, &lexicon);
+        println!("Updating lexicon...");
 
-        index = readonly_index.into_inner();
-        index.clear();
+        // add_to_lexicon(sorted_index, &lexicon);
+
+        index = Index::new()
     }
+
+    println!("Writing lexicon...");
+
+    let lexicon = lexicon.into_readonly();
 
     let out_path = out_folder.join("lexicon.bin");
-    write_lexicon_bin(&lexicon, &out_path).unwrap();
+    write_lexicon_bin(lexicon.iter(), &out_path).unwrap();
     let out_path = out_folder.join("lexicon.txt");
-    write_lexicon_plaintext(&lexicon, &out_path).unwrap();
+    write_lexicon_plaintext(lexicon.iter(), &out_path).unwrap();
 
     Ok(())
-}
-
-fn add_to_lexicon(index: &ReadonlyIndex, lexicon: &Lexicon) {
-    for (term, _) in index.iter() {
-        lexicon.add(term.to_owned());
-    }
 }
 
 fn read_lines_into_buffer(
