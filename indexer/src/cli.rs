@@ -18,4 +18,12 @@ pub struct Args {
     /// Chunk size in bytes
     #[arg(short, long)]
     pub chunk_size: usize,
+
+    /// Enables writing output in plaintext format
+    #[arg(long)]
+    pub write_txt: bool,
+
+    /// Disables writing output in binary format
+    #[arg(long)]
+    pub skip_bin: bool,
 }

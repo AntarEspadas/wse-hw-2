@@ -13,7 +13,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
-    generate_index(&args.input, args.chunk_size, args.workers, &args.out)?;
+    generate_index(
+        &args.input,
+        args.chunk_size,
+        args.workers,
+        &args.out,
+        args.write_txt,
+        !args.skip_bin,
+    )?;
 
     let finish = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 

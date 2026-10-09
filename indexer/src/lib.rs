@@ -25,11 +25,6 @@ pub fn write_index_plaintext<'a, I>(index: I, out_path: &Path) -> Result<(), Box
 where
     I: Iterator<Item = &'a mut IndexElement>,
 {
-    println!(
-        "Writing index of size {} to {out_path:?}",
-        index.size_hint().0
-    );
-
     let file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -53,11 +48,6 @@ pub fn write_index_bin<'a, I>(index: I, out_path: &Path) -> Result<(), Box<dyn E
 where
     I: Iterator<Item = &'a mut IndexElement>,
 {
-    println!(
-        "Writing index of size {} to {out_path:?}",
-        index.size_hint().0
-    );
-
     let file = OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -127,9 +117,7 @@ pub fn process_buffer(
     buffer: &[u8],
     index: &Index,
     lexicon: &ReadOnlyView<String, usize>,
-    worker_id: usize,
 ) -> Result<(), Box<dyn Error>> {
-    println!("[{worker_id}] Start processing data...");
     let mut term_counter = TermCounter::new();
     for line in str::from_utf8(buffer)?.lines() {
         let mut iterator = line.split('\t');
@@ -153,18 +141,10 @@ pub fn process_buffer(
             postings.get_or_insert_with(Vec::new).push((doc_id, count));
         }
     }
-    println!("[{worker_id}] Done processing data");
-
     Ok(())
 }
 
-fn populate_lexicon(
-    buffer: &[u8],
-    lexicon: &Lexicon,
-    worker_id: usize,
-) -> Result<(), Box<dyn Error>> {
-    println!("[{worker_id}] Populating lexicon...");
-
+fn populate_lexicon(buffer: &[u8], lexicon: &Lexicon) -> Result<(), Box<dyn Error>> {
     for line in str::from_utf8(buffer)?.lines() {
         let mut iterator = line.split('\t');
 
@@ -183,6 +163,8 @@ pub fn generate_index(
     chunk_size: usize,
     workers: usize,
     out_folder: &Path,
+    write_txt: bool,
+    write_bin: bool,
 ) -> Result<(), Box<dyn Error>> {
     let file = File::open(csv_path)?;
     let mut lexicon = Lexicon::new();
@@ -199,35 +181,34 @@ pub fn generate_index(
     for i in 0.. {
         let mut read = 0;
 
+        println!("Reading {chunk_size} bytes of data and populating lexicon...");
         thread::scope(|scope| {
-            for (worker_id, buffer) in buffers.iter_mut().enumerate() {
-                println!("Reading {buffer_size} bytes for worker {worker_id}...");
+            for buffer in buffers.iter_mut() {
                 buffer.clear();
                 read += read_lines_into_buffer(&mut reader, buffer, buffer_size).unwrap();
-                println!("Done reading {} bytes for worker {worker_id}", buffer.len());
 
                 let lexicon = &lexicon;
                 scope.spawn(move || {
-                    populate_lexicon(buffer, lexicon, worker_id).unwrap();
+                    populate_lexicon(buffer, lexicon).unwrap();
                 });
             }
         });
+        println!("Read {chunk_size} bytes of data");
+        println!("Lexicon size: {}", lexicon.len());
 
         let readonly_lexicon = lexicon.into_readonly();
         let index: Index = iter::repeat_with(|| Mutex::new(None))
             .take(readonly_lexicon.len())
             .collect();
 
+        println!("Indexing...");
         thread::scope(|scope| {
-            for (worker_id, buffer) in buffers.iter_mut().enumerate() {
+            for buffer in buffers.iter_mut() {
                 let index = &index;
                 let readonly_lexicon = &readonly_lexicon;
-                scope.spawn(move || {
-                    process_buffer(buffer, index, readonly_lexicon, worker_id).unwrap()
-                });
+                scope.spawn(move || process_buffer(buffer, index, readonly_lexicon).unwrap());
             }
         });
-
         lexicon = Lexicon::from_readonly(readonly_lexicon);
 
         if read == 0 {
@@ -239,10 +220,6 @@ pub fn generate_index(
             index.len(),
             index.capacity()
         );
-        let mut filename = format!("index-{i}");
-        let out_path = out_folder.join(&filename);
-        filename.push_str(".txt");
-        let out_path_txt = out_folder.join(&filename);
 
         let mut index = index;
 
@@ -253,19 +230,37 @@ pub fn generate_index(
             }
         }
 
-        write_index_plaintext(index.iter_mut(), &out_path_txt)?;
+        if write_txt {
+            let filename = format!("index-{i}.txt");
+            let out_path = out_folder.join(&filename);
 
-        write_index_bin(index.iter_mut(), &out_path)?;
+            println!("Writing index of size {} to {:?}", index.len(), out_path);
+
+            write_index_plaintext(index.iter_mut(), &out_path)?;
+        }
+
+        if write_bin {
+            let filename = format!("index-{i}.bin");
+            let out_path = out_folder.join(&filename);
+
+            println!("Writing index of size {} to {:?}", index.len(), out_path);
+
+            write_index_bin(index.iter_mut(), &out_path)?;
+        }
     }
 
     println!("Writing lexicon...");
 
     let lexicon = lexicon.into_readonly();
 
-    let out_path = out_folder.join("lexicon.bin");
-    write_lexicon_bin(lexicon.iter(), &out_path).unwrap();
-    let out_path = out_folder.join("lexicon.txt");
-    write_lexicon_plaintext(lexicon.iter(), &out_path).unwrap();
+    if write_txt {
+        let out_path = out_folder.join("lexicon.bin");
+        write_lexicon_bin(lexicon.iter(), &out_path).unwrap();
+    }
+    if write_bin {
+        let out_path = out_folder.join("lexicon.txt");
+        write_lexicon_plaintext(lexicon.iter(), &out_path).unwrap();
+    }
 
     Ok(())
 }
