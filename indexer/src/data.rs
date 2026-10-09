@@ -3,10 +3,7 @@ use std::{
         HashMap,
         hash_map::{Drain, Iter},
     },
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use parking_lot::Mutex;
@@ -15,28 +12,6 @@ use dashmap::{DashMap, ReadOnlyView};
 
 pub type IndexElement = Mutex<Option<Vec<(u32, u32)>>>;
 pub type Index = Vec<IndexElement>;
-
-pub struct IndexMessage {
-    pub buffer: Vec<u8>,
-    pub index: Arc<Index>,
-}
-
-pub struct MergeMessage {
-    pub src: Index,
-    pub dest: Index,
-}
-
-pub enum InMessage {
-    Index(IndexMessage),
-    Merge(MergeMessage),
-    Done,
-}
-
-pub enum OutMessage {
-    IndexDone(IndexMessage),
-    MergeDone(MergeMessage),
-    IndexError(IndexMessage),
-}
 
 pub struct TermCounter {
     term_counts: HashMap<String, u32>,
