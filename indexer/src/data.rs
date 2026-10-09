@@ -5,13 +5,15 @@ use std::{
     },
     sync::{
         Arc,
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
 };
 
+use parking_lot::Mutex;
+
 use dashmap::{DashMap, ReadOnlyView};
 
-pub type Index = DashMap<u32, Vec<(u32, u32)>>;
+pub type Index = Vec<Mutex<Vec<(u32, u32)>>>;
 pub type ReadonlyIndex = ReadOnlyView<u32, Vec<(u32, u32)>>;
 
 pub struct IndexMessage {
@@ -72,19 +74,19 @@ impl Default for TermCounter {
 }
 
 pub struct Lexicon {
-    dict: DashMap<String, u32>,
-    next_id: AtomicU32,
+    dict: DashMap<String, usize>,
+    next_id: AtomicUsize,
 }
 
 impl Lexicon {
     pub fn new() -> Self {
         Self {
-            dict: DashMap::new(),
-            next_id: AtomicU32::new(0),
+            dict: DashMap::with_shard_amount(2),
+            next_id: AtomicUsize::new(0),
         }
     }
 
-    pub fn add(&self, term: String) -> u32 {
+    pub fn add(&self, term: String) -> usize {
         *self
             .dict
             .entry(term)
@@ -104,8 +106,16 @@ impl Lexicon {
         self.dict.capacity()
     }
 
-    pub fn into_readonly(self) -> ReadOnlyView<String, u32> {
+    pub fn into_readonly(self) -> ReadOnlyView<String, usize> {
         self.dict.into_read_only()
+    }
+
+    pub fn from_readonly(lexicon: ReadOnlyView<String, usize>) -> Self {
+        let next_id = lexicon.len();
+        Self {
+            dict: lexicon.into_inner(),
+            next_id: AtomicUsize::new(next_id),
+        }
     }
 }
 
