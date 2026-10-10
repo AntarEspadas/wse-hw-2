@@ -1,3 +1,4 @@
+mod data;
 mod index_reader;
 mod index_writer;
 

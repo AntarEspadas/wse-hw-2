@@ -6,19 +6,19 @@ use std::{
     path::Path,
 };
 
-pub struct IndexEntry {
-    term_id: u32,
-    doc_ids: Vec<u32>,
-    frequencies: Vec<u32>,
-}
+use crate::index::data::{IndexEntry, LexiconEntry};
 
 pub struct IndexWriter {
     writer: BufWriter<File>,
     entries: VecDeque<IndexEntry>,
+    lexicon: Vec<LexiconEntry>,
+    buffer_size: usize,
 }
 
 impl IndexWriter {
-    pub fn open(path: &Path) -> Result<Self, Box<dyn Error>> {
+    pub fn open(path: &Path, buffer_size: usize) -> Result<Self, Box<dyn Error>> {
+        assert!(buffer_size >= 1);
+
         let file = OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -28,54 +28,61 @@ impl IndexWriter {
         let writer = BufWriter::new(file);
         Ok(Self {
             writer,
-            entries: VecDeque::new(),
+            entries: VecDeque::with_capacity(buffer_size),
+            lexicon: Vec::new(),
+            buffer_size,
         })
     }
 
-    pub fn add_ordered_entry(&mut self, term_id: u32, postings: Vec<(u32, u32)>) {
-        if let Some(back) = self.entries.back_mut()
-            && back.term_id == term_id
+    pub fn write_entry(&mut self, mut entry: IndexEntry) -> Result<(), Box<dyn Error>> {
+        if let Some(last_entry) = self.entries.back_mut()
+            && last_entry.term == entry.term
         {
-            for (doc_id, freq) in postings {
-                back.doc_ids.push(doc_id);
-                back.frequencies.push(freq);
-            }
+            last_entry.postings.append(&mut entry.postings);
         } else {
-            let mut doc_ids: Vec<u32> = Vec::with_capacity(postings.len());
-            let mut frequencies: Vec<u32> = Vec::with_capacity(postings.len());
-            for (doc_id, freq) in postings {
-                doc_ids.push(doc_id);
-                frequencies.push(freq);
+            if self.entries.len() >= self.buffer_size {
+                self.write_current()?;
+                debug_assert_eq!(self.entries.len(), 0);
             }
-
-            self.entries.push_back(IndexEntry {
-                term_id,
-                doc_ids,
-                frequencies,
-            });
+            self.entries.push_back(entry);
         }
+        Ok(())
     }
 
-    pub fn write_current(&mut self) -> Result<Vec<(u32, u32)>, Box<dyn Error>> {
-        let mut result = Vec::with_capacity(self.entries.len());
-        while let Some(entry) = self.entries.pop_front() {
+    pub fn write_current(&mut self) -> Result<(), Box<dyn Error>> {
+        let mut offset = self
+            .lexicon
+            .last()
+            .map(|x| x.offset + x.len * size_of::<u32>() * 2)
+            .unwrap_or(0);
+        while let Some(mut entry) = self.entries.pop_front() {
+            let len = entry.postings.len();
+
+            entry.postings.sort_unstable_by_key(|x| x.doc_id);
+
             let doc_ids: Vec<_> = entry
-                .doc_ids
-                .into_iter()
-                .flat_map(|x| x.to_be_bytes())
+                .postings
+                .iter()
+                .flat_map(|x| x.doc_id.to_be_bytes())
                 .collect();
 
             let frequencies: Vec<_> = entry
-                .frequencies
-                .into_iter()
-                .flat_map(|x| x.to_be_bytes())
+                .postings
+                .iter()
+                .flat_map(|x| x.frequency.to_be_bytes())
                 .collect();
 
             self.writer.write_all(&doc_ids)?;
             self.writer.write_all(&frequencies)?;
 
-            result.push((entry.term_id, doc_ids.len() as u32));
+            self.lexicon.push(LexiconEntry {
+                term: entry.term,
+                offset,
+                len,
+            });
+
+            offset += len * size_of::<u32>() * 2;
         }
-        Ok(result)
+        Ok(())
     }
 }

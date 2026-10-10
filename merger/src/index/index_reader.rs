@@ -2,84 +2,126 @@ use std::{
     collections::VecDeque,
     error::Error,
     fs::File,
-    io::{BufReader, Read},
+    io::{BufRead, BufReader, Read},
     path::Path,
 };
 
-pub struct IndexEntry {
-    pub term_id: u32,
-    pub postings: Vec<(u32, u32)>,
-}
+use crate::index::data::{IndexEntry, LexiconEntry, Posting};
 
 pub struct IndexReader {
-    lengths: Vec<u32>,
+    lexicon: VecDeque<LexiconEntry>,
+    entries: VecDeque<IndexEntry>,
     reader: BufReader<File>,
-    i: usize,
+    buffer_size: usize,
 }
 
 impl IndexReader {
-    pub fn open(index_path: &Path, lengths_path: &Path) -> Result<Self, Box<dyn Error>> {
-        let lengths = IndexReader::read_lengths(lengths_path)?;
+    pub fn open(
+        index_path: &Path,
+        lexicon_path: &Path,
+        buffer_size: usize,
+    ) -> Result<Self, Box<dyn Error>> {
+        assert!(buffer_size >= 1);
+        let lexicon = IndexReader::read_lexicon(lexicon_path)?;
 
         let index_file = File::open(index_path)?;
 
         let reader = BufReader::new(index_file);
 
         Ok(Self {
-            lengths,
+            lexicon,
+            entries: VecDeque::with_capacity(buffer_size),
             reader,
-            i: 0,
+            buffer_size,
         })
     }
 
-    fn read_lengths(path: &Path) -> Result<Vec<u32>, Box<dyn Error>> {
-        let mut file = File::open(path)?;
+    fn read_lexicon(path: &Path) -> Result<VecDeque<LexiconEntry>, Box<dyn Error>> {
+        let file = File::open(path)?;
 
-        let mut buffer: Vec<u8> = Vec::new();
+        let mut reader = BufReader::new(file);
 
-        file.read_to_end(&mut buffer)?;
+        let mut result = VecDeque::new();
 
-        Ok(buffer
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|x| u32::from_be_bytes(*x))
-            .collect())
+        loop {
+            let mut term: Vec<u8> = Vec::new();
+            let read = reader.read_until(b'\0', &mut term)?;
+
+            if read == 0 {
+                break;
+            }
+
+            // Remove null byte from end
+            term.truncate(term.len() - 1);
+
+            let term = String::from_utf8(term)?;
+
+            let mut offset = [0u8; 4];
+            let mut length = [0u8; 4];
+
+            reader.read_exact(&mut offset)?;
+            reader.read_exact(&mut length)?;
+
+            result.push_back(LexiconEntry {
+                term,
+                offset: u32::from_be_bytes(offset) as usize,
+                len: u32::from_be_bytes(length) as usize,
+            });
+        }
+
+        Ok(result)
     }
 
-    pub fn read_entries(&mut self, n: usize) -> Result<VecDeque<IndexEntry>, Box<dyn Error>> {
-        let mut result = VecDeque::with_capacity(n);
-        for i in self.lengths.iter().skip(self.i).take(n) {
-            let mut term_id = [9u8; 4];
+    pub fn next_entry(&mut self) -> Result<Option<IndexEntry>, Box<dyn Error>> {
+        let entry = self.entries.pop_front();
+        if entry.is_some() {
+            return Ok(entry);
+        }
 
-            self.reader.read_exact(&mut term_id)?;
-
-            let term_id = u32::from_be_bytes(term_id);
-
-            let size = *i as usize * size_of::<(u32, u32)>();
-            let mut postings_buf: Vec<u8> = Vec::with_capacity(size);
+        for _ in 0..self.buffer_size {
+            let Some(entry) = self.lexicon.pop_front() else {
+                return Ok(None);
+            };
+            let length = entry.len * size_of::<u32>();
+            let mut doc_ids: Vec<u8> = Vec::with_capacity(length);
 
             self.reader
                 .by_ref()
-                .take(size as u64)
-                .read_to_end(&mut postings_buf)?;
+                .take(length as u64)
+                .read_to_end(&mut doc_ids)?;
 
-            let postings: Vec<_> = postings_buf
-                .as_chunks::<8>()
+            let doc_ids: Vec<_> = doc_ids
+                .as_chunks::<4>()
                 .0
                 .iter()
-                .map(|buf| {
-                    let doc_id = u32::from_be_bytes(buf[..4].try_into().unwrap());
-                    let count = u32::from_be_bytes(buf[4..].try_into().unwrap());
-                    (doc_id, count)
-                })
+                .map(|buf| u32::from_be_bytes(buf.as_slice().try_into().unwrap()))
                 .collect();
 
-            result.push_back(IndexEntry { term_id, postings });
+            let mut frequencies: Vec<u8> = Vec::with_capacity(length);
+            self.reader
+                .by_ref()
+                .take(length as u64)
+                .read_to_end(&mut frequencies)?;
+
+            let frequencies: Vec<_> = frequencies
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|buf| u32::from_be_bytes(buf.as_slice().try_into().unwrap()))
+                .collect();
+
+            let postings: Vec<_> = doc_ids
+                .into_iter()
+                .zip(frequencies)
+                .map(|(doc_id, frequency)| Posting { doc_id, frequency })
+                .collect();
+
+            self.entries.push_back(IndexEntry {
+                term: entry.term,
+                postings,
+            });
         }
 
-        self.i += n;
-
-        Ok(result)
+        Ok(self.entries.pop_front())
     }
 }
