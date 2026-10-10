@@ -1,17 +1,12 @@
-use std::{
-    collections::{
-        HashMap,
-        hash_map::{Drain, Iter},
-    },
-    sync::atomic::{AtomicUsize, Ordering},
+use std::collections::{
+    HashMap,
+    hash_map::{Drain, Iter},
 };
 
-use parking_lot::Mutex;
+use dashmap::DashMap;
 
-use dashmap::{DashMap, ReadOnlyView};
-
-pub type IndexElement = Mutex<Option<Vec<(u32, u32)>>>;
-pub type Index = Vec<IndexElement>;
+pub type IndexElement = (String, Vec<(u32, u32)>);
+pub type Index = DashMap<String, Vec<(u32, u32)>>;
 
 pub struct TermCounter {
     term_counts: HashMap<String, u32>,
@@ -43,58 +38,6 @@ impl TermCounter {
 }
 
 impl Default for TermCounter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct Lexicon {
-    dict: DashMap<String, usize>,
-    next_id: AtomicUsize,
-}
-
-impl Lexicon {
-    pub fn new() -> Self {
-        Self {
-            dict: DashMap::new(),
-            next_id: AtomicUsize::new(0),
-        }
-    }
-
-    pub fn add(&self, term: String) -> usize {
-        *self
-            .dict
-            .entry(term)
-            .or_insert_with(|| self.next_id.fetch_add(1, Ordering::Relaxed))
-            .value()
-    }
-
-    pub fn len(&self) -> usize {
-        self.dict.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.dict.is_empty()
-    }
-
-    pub fn capacity(&self) -> usize {
-        self.dict.capacity()
-    }
-
-    pub fn into_readonly(self) -> ReadOnlyView<String, usize> {
-        self.dict.into_read_only()
-    }
-
-    pub fn from_readonly(lexicon: ReadOnlyView<String, usize>) -> Self {
-        let next_id = lexicon.len();
-        Self {
-            dict: lexicon.into_inner(),
-            next_id: AtomicUsize::new(next_id),
-        }
-    }
-}
-
-impl Default for Lexicon {
     fn default() -> Self {
         Self::new()
     }
