@@ -49,7 +49,13 @@ impl IndexWriter {
         Ok(())
     }
 
-    pub fn write_current(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn flush(&mut self) -> Result<(), Box<dyn Error>> {
+        self.write_current()?;
+        self.writer.flush()?;
+        Ok(())
+    }
+
+    fn write_current(&mut self) -> Result<(), Box<dyn Error>> {
         let mut offset = self
             .lexicon
             .last()
@@ -82,6 +88,25 @@ impl IndexWriter {
             });
 
             offset += len * size_of::<u32>() * 2;
+        }
+        Ok(())
+    }
+
+    pub fn write_lexicon(&self, path: &Path) -> Result<(), Box<dyn Error>> {
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)?;
+
+        let mut writer = BufWriter::new(file);
+
+        for entry in self.lexicon.iter() {
+            write!(writer, "{}\0", entry.term)?;
+            let offset = (entry.offset as u32).to_be_bytes();
+            let len = (entry.len as u32).to_be_bytes();
+            writer.write_all(&offset)?;
+            writer.write_all(&len)?;
         }
         Ok(())
     }

@@ -1,30 +1,19 @@
 use std::{error::Error, path::Path};
 
-use merger::index::IndexReader;
+use merger::merge;
 
-const BUFFER_SIZE: usize = 100;
+const BUFFER_SIZE: usize = 1000;
+const IN_FOLDER: &str = "F:\\output";
+// const OUT_PATH: &str = "F:\\output\\final";
+const CHUNKS: usize = 2;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let lexicon_path = Path::new("F:\\output\\lexicon-0.bin");
-    let index_path = Path::new("F:\\output\\index-0.bin");
+    let work_folder = Path::new(IN_FOLDER);
 
-    let mut index_reader = IndexReader::open(index_path, lexicon_path, BUFFER_SIZE)?;
+    let (index_path, lexicon_path) = merge(work_folder, CHUNKS, BUFFER_SIZE)?;
 
-    for _ in 0..10 {
-        let Some(entry) = index_reader.next_entry()? else {
-            break;
-        };
-        println!("term: {}", entry.term);
-        println!("Postings: {}", entry.postings.len());
-    }
-
-    for _ in 0..10 {
-        let Some(entry) = index_reader.next_entry()? else {
-            break;
-        };
-        println!("term: {}", entry.term);
-        println!("Postings: {}", entry.postings.len());
-    }
+    println!("Index written to {index_path:?}");
+    println!("Lexicon written to {lexicon_path:?}");
 
     Ok(())
 }
