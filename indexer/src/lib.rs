@@ -1,13 +1,15 @@
 use std::error::Error;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, Write};
 use std::path::Path;
 use std::{iter, println, thread};
 
 use crate::data::{Index, IndexElement, TermCounter};
+use crate::page_table::{Document, PageTable};
 
 pub mod cli;
 pub mod data;
+pub mod page_table;
 
 fn term(token: &str) -> String {
     let mut t = token.to_lowercase();
@@ -116,16 +118,30 @@ where
 
 fn process_buffer(
     buffer: &[u8],
+    page_table: &mut Option<PageTable>,
+    offset: usize,
     index: &Index,
     // lexicon: &ReadOnlyView<String, usize>,
 ) -> Result<(), Box<dyn Error>> {
     let mut term_counter = TermCounter::new();
-    for line in str::from_utf8(buffer)?.lines() {
+    for (offset, line) in str::from_utf8(buffer)?.lines().scan(offset, |state, line| {
+        let offset = *state;
+        *state += line.len();
+        Some((offset, line))
+    }) {
         let mut iterator = line.split('\t');
         let doc_id = iterator.next().unwrap();
         let doc_id: u32 = doc_id.parse()?;
 
         let content = iterator.next().unwrap();
+
+        let page_table = page_table.get_or_insert_with(|| PageTable::new(doc_id));
+
+        page_table.add(Document {
+            id: doc_id,
+            len: content.len(),
+            offset: offset as u32,
+        });
 
         for token in content.split_whitespace() {
             let t = term(token);
@@ -163,20 +179,37 @@ pub fn generate_index(
         .take(workers)
         .collect();
 
+    let mut document_count = 0usize;
+    let mut total_doc_len = 0usize;
+
+    let page_table_path = out_folder.join("page-table.bin");
+    let page_table_file = OpenOptions::new()
+        .truncate(true)
+        .create(true)
+        .write(true)
+        .open(page_table_path)?;
+    let mut page_table_writer = BufWriter::new(page_table_file);
+
     for i in 0.. {
         let mut read = 0;
 
         let index = Index::new();
+        let mut page_tables: Vec<Option<PageTable>> =
+            iter::repeat_with(|| None).take(workers).collect();
 
         println!("Indexing...");
-        thread::scope(|scope| {
-            for buffer in buffers.iter_mut() {
+        thread::scope(|scope| -> Result<(), Box<dyn Error>> {
+            for (buffer, page_table) in buffers.iter_mut().zip(page_tables.iter_mut()) {
                 buffer.clear();
-                read += read_lines_into_buffer(&mut reader, buffer, buffer_size).unwrap();
+                let offset = reader.stream_position()?;
+                read += read_lines_into_buffer(&mut reader, buffer, buffer_size)?;
                 let index = &index;
-                scope.spawn(move || process_buffer(buffer, index).unwrap());
+                scope.spawn(move || {
+                    process_buffer(buffer, page_table, offset as usize, index).unwrap()
+                });
             }
-        });
+            Ok(())
+        })?;
 
         if read == 0 {
             break;
@@ -198,6 +231,18 @@ pub fn generate_index(
 
         index.sort_unstable_by(|x, y| x.0.cmp(&y.0));
 
+        let mut page_tables: Vec<_> = page_tables.into_iter().flatten().collect();
+        page_tables.sort_unstable_by_key(PageTable::first_doc_id);
+
+        document_count += page_tables
+            .iter()
+            .map(PageTable::document_count)
+            .sum::<usize>();
+        total_doc_len += page_tables
+            .iter()
+            .map(PageTable::total_length)
+            .sum::<usize>();
+
         if write_txt {
             let filename = format!("index-{i}.txt");
             let out_path = out_folder.join(&filename);
@@ -211,7 +256,7 @@ pub fn generate_index(
 
             println!("Writing lexicon to {:?}", out_path);
 
-            write_lexicon_plaintext(index.iter(), &out_path).unwrap();
+            write_lexicon_plaintext(index.iter(), &out_path)?;
         }
 
         if write_bin {
@@ -227,16 +272,31 @@ pub fn generate_index(
 
             println!("Writing lexicon to {:?}", out_path);
 
-            write_lexicon_bin(index.iter(), &out_path).unwrap();
+            write_lexicon_bin(index.iter(), &out_path)?;
+
+            let out_path = out_folder.join("page-table.bin");
+
+            println!("Writing page table to {:?}", out_path);
+            for page_table in page_tables {
+                page_table.write(&mut page_table_writer)?;
+            }
         }
     }
 
-    // println!("Writing lexicon...");
+    if write_bin || write_txt {
+        let out_path = out_folder.join("metadata.txt");
+        println!("Writing metadata to {:?}...", out_path);
 
-    // let lexicon = lexicon.into_readonly();
+        let mut file = OpenOptions::new()
+            .truncate(true)
+            .create(true)
+            .write(true)
+            .open(out_path)?;
 
-    // if write_txt {}
-    // if write_bin {}
+        let average_len = total_doc_len / document_count;
+        writeln!(file, "{document_count},{average_len}")?;
+        write!(file, "count, average")?;
+    }
 
     Ok(())
 }
