@@ -1,27 +1,36 @@
 use crate::simple9::get_mode;
 
-pub fn compress(mut data: &[u32]) -> Vec<u32> {
-    let mut result = Vec::new();
+pub struct Simple9CompressIter<'a> {
+    data: &'a [u32],
+}
 
-    while !data.is_empty() {
-        let selector = get_selector(data);
+impl<'a> Iterator for Simple9CompressIter<'a> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.data.is_empty() {
+            return None;
+        }
+        let selector = get_selector(self.data);
         let (n, word) = match selector {
-            0 => compress_single::<0>(data),
-            1 => compress_single::<1>(data),
-            2 => compress_single::<2>(data),
-            3 => compress_single::<3>(data),
-            4 => compress_single::<4>(data),
-            5 => compress_single::<5>(data),
-            6 => compress_single::<6>(data),
-            7 => compress_single::<7>(data),
-            8 => compress_single::<8>(data),
+            0 => compress_single::<0>(self.data),
+            1 => compress_single::<1>(self.data),
+            2 => compress_single::<2>(self.data),
+            3 => compress_single::<3>(self.data),
+            4 => compress_single::<4>(self.data),
+            5 => compress_single::<5>(self.data),
+            6 => compress_single::<6>(self.data),
+            7 => compress_single::<7>(self.data),
+            8 => compress_single::<8>(self.data),
             _ => panic!("Invalid selector"),
         };
-        result.push(word);
-        data = &data[n..];
+        self.data = &self.data[n..];
+        Some(word)
     }
+}
 
-    result
+pub fn compress(data: &[u32]) -> Simple9CompressIter<'_> {
+    Simple9CompressIter { data }
 }
 
 fn get_selector(data: &[u32]) -> u32 {

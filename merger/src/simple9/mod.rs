@@ -38,7 +38,7 @@ mod tests {
     ];
 
     fn assert_roundtrip(data: &[u32]) {
-        let compressed = compress(data);
+        let compressed: Vec<u32> = compress(data).collect();
         let decompressed = decompress(&compressed);
 
         assert_eq!(data, &decompressed);
@@ -116,7 +116,7 @@ mod tests {
         ];
 
         for value in values {
-            assert_eq!(compress(&[value]), vec![value]);
+            assert_eq!(compress(&[value]).collect::<Vec<_>>(), vec![value]);
             assert_eq!(decompress(&[value]), vec![value]);
         }
     }
@@ -127,7 +127,7 @@ mod tests {
             let data = vec![value; count];
 
             assert_eq!(
-                compress(&data),
+                compress(&data).collect::<Vec<_>>(),
                 vec![word],
                 "value {value} repeated {count} times should fit in one word"
             );
@@ -166,7 +166,11 @@ mod tests {
         ];
 
         for &(word, data) in cases {
-            assert_eq!(compress(data), vec![word], "incorrect packing of {data:?}");
+            assert_eq!(
+                compress(data).collect::<Vec<_>>(),
+                vec![word],
+                "incorrect packing of {data:?}"
+            );
             assert_eq!(
                 decompress(&[word]).as_slice(),
                 data,
@@ -197,7 +201,7 @@ mod tests {
             let data = vec![0; len];
 
             assert_eq!(
-                compress(&data).as_slice(),
+                compress(&data).collect::<Vec<_>>().as_slice(),
                 words,
                 "incorrect packing for input length {len}"
             );
@@ -211,7 +215,7 @@ mod tests {
             for position in 0..count {
                 let mut data = vec![max_value; count];
                 data[position] = max_value + 1;
-                let compressed = compress(&data);
+                let compressed: Vec<_> = compress(&data).collect();
 
                 assert!(
                     (compressed[0] >> 28) < (word >> 28),
@@ -235,7 +239,7 @@ mod tests {
         data.extend_from_slice(&[1; 28]);
         let words = [0x8000_0000, 0x0fff_ffff, 0x8fff_ffff];
 
-        assert_eq!(compress(&data).as_slice(), &words);
+        assert_eq!(compress(&data).collect::<Vec<_>>().as_slice(), &words);
         assert_eq!(decompress(&words), data);
     }
 
@@ -269,7 +273,7 @@ mod tests {
                 data[position] = value;
 
                 assert!(
-                    std::panic::catch_unwind(|| compress(&data)).is_err(),
+                    std::panic::catch_unwind(|| compress(&data).collect::<Vec<_>>()).is_err(),
                     "unsupported value {value} at position {position} must be rejected"
                 );
             }
