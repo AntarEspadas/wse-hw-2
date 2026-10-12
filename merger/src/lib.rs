@@ -9,6 +9,7 @@ use crate::index::data::IndexEntry;
 use crate::index::{IndexReader, IndexWriter};
 
 pub mod index;
+pub mod simple9;
 
 pub fn merge(
     work_folder: &Path,
