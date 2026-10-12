@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Read, Seek, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::{iter, println, thread};
 
@@ -119,16 +119,11 @@ where
 fn process_buffer(
     buffer: &[u8],
     page_table: &mut Option<PageTable>,
-    offset: usize,
     index: &Index,
     // lexicon: &ReadOnlyView<String, usize>,
 ) -> Result<(), Box<dyn Error>> {
     let mut term_counter = TermCounter::new();
-    for (offset, line) in str::from_utf8(buffer)?.lines().scan(offset, |state, line| {
-        let offset = *state;
-        *state += line.len();
-        Some((offset, line))
-    }) {
+    for line in str::from_utf8(buffer)?.lines() {
         let mut iterator = line.split('\t');
         let doc_id = iterator.next().unwrap();
         let doc_id: u32 = doc_id.parse()?;
@@ -140,7 +135,6 @@ fn process_buffer(
         page_table.add(Document {
             id: doc_id,
             len: content.len(),
-            offset: offset as u32,
         });
 
         for token in content.split_whitespace() {
@@ -201,12 +195,9 @@ pub fn generate_index(
         thread::scope(|scope| -> Result<(), Box<dyn Error>> {
             for (buffer, page_table) in buffers.iter_mut().zip(page_tables.iter_mut()) {
                 buffer.clear();
-                let offset = reader.stream_position()?;
                 read += read_lines_into_buffer(&mut reader, buffer, buffer_size)?;
                 let index = &index;
-                scope.spawn(move || {
-                    process_buffer(buffer, page_table, offset as usize, index).unwrap()
-                });
+                scope.spawn(move || process_buffer(buffer, page_table, index).unwrap());
             }
             Ok(())
         })?;

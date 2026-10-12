@@ -7,7 +7,6 @@ use std::{
 pub struct Document {
     pub id: u32,
     pub len: usize,
-    pub offset: u32,
 }
 
 pub struct PageTable {
@@ -32,10 +31,8 @@ impl PageTable {
 
     pub fn write(self, writer: &mut BufWriter<File>) -> Result<(), Box<dyn Error>> {
         for document in self.documents {
-            let offset = document.offset.to_be_bytes();
             let len = (document.len as u32).to_be_bytes();
 
-            writer.write_all(&offset)?;
             writer.write_all(&len)?;
         }
         Ok(())
