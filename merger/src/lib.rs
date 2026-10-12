@@ -6,17 +6,21 @@ use std::path::{Path, PathBuf};
 use glob::glob;
 
 use crate::index::data::IndexEntry;
-use crate::index::{IndexReader, IndexWriter};
+use crate::index::{FinalIndexWriter, IndexReader, IndexWriter, IntermediateIndexWriter};
+use crate::page_table::PageTable;
 
+pub mod bm25;
 pub mod index;
+pub mod page_table;
 pub mod simple9;
 
 pub fn merge(
-    work_folder: &Path,
+    work_dir: &Path,
+    out_dir: &Path,
     chunks: usize,
     buffer_size: usize,
-) -> Result<(PathBuf, PathBuf), Box<dyn Error>> {
-    let pattern = work_folder.join("index-*.bin");
+) -> Result<(), Box<dyn Error>> {
+    let pattern = work_dir.join("index-*.bin");
     let pattern = pattern.to_str().unwrap();
     let mut index_paths: VecDeque<_> = glob(pattern)?
         .filter_map(Result::ok)
@@ -30,37 +34,53 @@ pub fn merge(
         .collect();
 
     for i in 0.. {
-        if index_paths.len() <= 1 {
-            break;
-        }
         let input_paths: Vec<_> = index_paths.drain(..chunks).collect();
 
-        let output_index_path = work_folder.join(format!("merged-index-{i}.bin"));
-        let output_lexicon_path = work_folder.join(format!("merged-lexicon-{i}.bin"));
+        if index_paths.is_empty() {
+            let output_index_path = out_dir.join("index.bin");
+            let output_lexicon_path = out_dir.join("lexicon.bin");
+            let page_table_path = work_dir.join("page-table.bin");
 
+            let page_table = PageTable::read(&page_table_path)?;
+
+            let index_writer = FinalIndexWriter::open(&output_index_path, page_table, buffer_size)?;
+
+            println!("Pass {i}: Merging last {} indices...", input_paths.len());
+
+            merge_indices(
+                &input_paths,
+                index_writer,
+                &output_lexicon_path,
+                buffer_size,
+            )?;
+
+            return Ok(());
+        }
+
+        let output_index_path = work_dir.join(format!("merged-index-{i}.bin"));
+        let output_lexicon_path = work_dir.join(format!("merged-lexicon-{i}.bin"));
+
+        let index_writer = IntermediateIndexWriter::open(&output_index_path, buffer_size)?;
+
+        println!("Pass {}: Merging {chunks} indices...", i);
         merge_indices(
             &input_paths,
-            &output_index_path,
+            index_writer,
             &output_lexicon_path,
             buffer_size,
         )?;
 
         index_paths.push_back((output_index_path, output_lexicon_path));
     }
-
-    Ok(index_paths.pop_front().unwrap())
+    Ok(())
 }
 
 pub fn merge_indices(
     input_paths: &[(PathBuf, PathBuf)],
-    output_index_path: &Path,
+    mut index_writer: impl IndexWriter,
     output_lexicon_path: &Path,
     buffer_size: usize,
 ) -> Result<(), Box<dyn Error>> {
-    println!("Creating writer...");
-    let mut writer = IndexWriter::open(output_index_path, buffer_size)?;
-
-    println!("Creating readers...");
     let readers: Result<Vec<_>, Box<dyn Error>> = input_paths
         .iter()
         .map(|x| IndexReader::open(&x.0, &x.1, buffer_size))
@@ -83,7 +103,7 @@ pub fn merge_indices(
     }
 
     while let Some(element) = heap.pop() {
-        writer.write_entry(element.entry)?;
+        index_writer.write_entry(element.entry)?;
 
         if let Some(entry) = element.index_reader.next_entry()? {
             heap.push(HeapElement {
@@ -93,9 +113,9 @@ pub fn merge_indices(
         }
     }
 
-    writer.flush()?;
+    index_writer.flush()?;
 
-    writer.write_lexicon(output_lexicon_path)?;
+    index_writer.write_lexicon(output_lexicon_path)?;
     Ok(())
 }
 

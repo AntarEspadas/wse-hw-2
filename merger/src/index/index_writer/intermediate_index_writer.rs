@@ -6,16 +6,19 @@ use std::{
     path::Path,
 };
 
-use crate::index::data::{IndexEntry, LexiconEntry};
+use crate::index::{
+    data::{IndexEntry, LexiconEntry},
+    index_writer::IndexWriter,
+};
 
-pub struct CompressedIndexWriter {
+pub struct IntermediateIndexWriter {
     writer: BufWriter<File>,
     entries: VecDeque<IndexEntry>,
     lexicon: Vec<LexiconEntry>,
     buffer_size: usize,
 }
 
-impl CompressedIndexWriter {
+impl IntermediateIndexWriter {
     pub fn open(path: &Path, buffer_size: usize) -> Result<Self, Box<dyn Error>> {
         assert!(buffer_size >= 1);
 
@@ -32,27 +35,6 @@ impl CompressedIndexWriter {
             lexicon: Vec::new(),
             buffer_size,
         })
-    }
-
-    pub fn write_entry(&mut self, mut entry: IndexEntry) -> Result<(), Box<dyn Error>> {
-        if let Some(last_entry) = self.entries.back_mut()
-            && last_entry.term == entry.term
-        {
-            last_entry.postings.append(&mut entry.postings);
-        } else {
-            if self.entries.len() >= self.buffer_size {
-                self.write_current()?;
-                debug_assert_eq!(self.entries.len(), 0);
-            }
-            self.entries.push_back(entry);
-        }
-        Ok(())
-    }
-
-    pub fn flush(&mut self) -> Result<(), Box<dyn Error>> {
-        self.write_current()?;
-        self.writer.flush()?;
-        Ok(())
     }
 
     fn write_current(&mut self) -> Result<(), Box<dyn Error>> {
@@ -91,8 +73,10 @@ impl CompressedIndexWriter {
         }
         Ok(())
     }
+}
 
-    pub fn write_lexicon(&self, path: &Path) -> Result<(), Box<dyn Error>> {
+impl IndexWriter for IntermediateIndexWriter {
+    fn write_lexicon(&self, path: &Path) -> Result<(), Box<dyn Error>> {
         let file = OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -107,6 +91,26 @@ impl CompressedIndexWriter {
             let len = (entry.len as u32).to_be_bytes();
             writer.write_all(&offset)?;
             writer.write_all(&len)?;
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), Box<dyn Error>> {
+        self.write_current()?;
+        self.writer.flush()?;
+        Ok(())
+    }
+    fn write_entry(&mut self, mut entry: IndexEntry) -> Result<(), Box<dyn Error>> {
+        if let Some(last_entry) = self.entries.back_mut()
+            && last_entry.term == entry.term
+        {
+            last_entry.postings.append(&mut entry.postings);
+        } else {
+            if self.entries.len() >= self.buffer_size {
+                self.write_current()?;
+                debug_assert_eq!(self.entries.len(), 0);
+            }
+            self.entries.push_back(entry);
         }
         Ok(())
     }
