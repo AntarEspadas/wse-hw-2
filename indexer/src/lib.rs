@@ -173,9 +173,6 @@ pub fn generate_index(
         .take(workers)
         .collect();
 
-    let mut document_count = 0usize;
-    let mut total_doc_len = 0usize;
-
     let page_table_path = out_folder.join("page-table.bin");
     let page_table_file = OpenOptions::new()
         .truncate(true)
@@ -225,15 +222,6 @@ pub fn generate_index(
         let mut page_tables: Vec<_> = page_tables.into_iter().flatten().collect();
         page_tables.sort_unstable_by_key(PageTable::first_doc_id);
 
-        document_count += page_tables
-            .iter()
-            .map(PageTable::document_count)
-            .sum::<usize>();
-        total_doc_len += page_tables
-            .iter()
-            .map(PageTable::total_length)
-            .sum::<usize>();
-
         if write_txt {
             let filename = format!("index-{i}.txt");
             let out_path = out_folder.join(&filename);
@@ -272,21 +260,6 @@ pub fn generate_index(
                 page_table.write(&mut page_table_writer)?;
             }
         }
-    }
-
-    if write_bin || write_txt {
-        let out_path = out_folder.join("metadata.txt");
-        println!("Writing metadata to {:?}...", out_path);
-
-        let mut file = OpenOptions::new()
-            .truncate(true)
-            .create(true)
-            .write(true)
-            .open(out_path)?;
-
-        let average_len = total_doc_len / document_count;
-        writeln!(file, "{document_count},{average_len}")?;
-        write!(file, "count, average")?;
     }
 
     Ok(())
