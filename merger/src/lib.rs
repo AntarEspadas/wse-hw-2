@@ -12,7 +12,6 @@ use crate::page_table::PageTable;
 pub mod bm25;
 pub mod index;
 pub mod page_table;
-pub mod simple9;
 
 pub fn merge(
     work_dir: &Path,

@@ -6,6 +6,8 @@ use std::{
     path::Path,
 };
 
+use common::compression::simple9::compress;
+
 use crate::{
     bm25,
     index::{
@@ -21,6 +23,7 @@ pub struct FinalIndexWriter {
     lexicon: Vec<LexiconEntry>,
     page_table: PageTable,
     buffer_size: usize,
+    current_offset: usize,
 }
 
 impl FinalIndexWriter {
@@ -44,63 +47,73 @@ impl FinalIndexWriter {
             lexicon: Vec::new(),
             page_table,
             buffer_size,
+            current_offset: 0,
         })
     }
 
     fn write_current(&mut self) -> Result<(), Box<dyn Error>> {
-        const U32_SIZE: usize = size_of::<u32>();
-
-        let mut offset = self
-            .lexicon
-            .last()
-            .map(|x| x.offset + x.len * U32_SIZE * 2 + U32_SIZE)
-            .unwrap_or(0);
         while let Some(mut entry) = self.entries.pop_front() {
-            let len = entry.postings.len();
-
             entry.postings.sort_unstable_by_key(|x| x.doc_id);
 
-            let mut doc_ids: Vec<u8> = Vec::with_capacity(entry.postings.len() * U32_SIZE);
+            let mut doc_ids = Vec::with_capacity(entry.postings.len());
             let mut previous = 0u32;
 
             for posting in entry.postings.iter() {
                 let doc_id = posting.doc_id - previous;
-                let doc_id = doc_id.to_be_bytes();
-                doc_ids.extend(&doc_id);
+                // let doc_id = doc_id.to_be_bytes();
+                // doc_ids.extend(&doc_id);
+                doc_ids.push(doc_id);
                 previous = posting.doc_id
             }
 
-            let mut max_score = 0f32;
+            let mut max_score = 0u32;
 
-            let impact_scores: Vec<_> = entry
-                .postings
-                .iter()
-                .map(|x| {
-                    let score = bm25::pre_compute(
-                        x.doc_id,
-                        x.frequency as f64,
-                        entry.postings.len() as f64,
-                        &self.page_table,
-                    );
-                    max_score = max_score.max(score);
-                    score
-                })
-                .flat_map(|x| x.to_be_bytes())
-                .collect();
+            let mut impact_scores = Vec::with_capacity(entry.postings.len());
+
+            for posting in entry.postings.iter() {
+                let score = bm25::pre_compute(
+                    posting.doc_id,
+                    posting.frequency as f64,
+                    entry.postings.len() as f64,
+                    &self.page_table,
+                );
+                let score = (score * 100f32).round() as u32;
+                max_score = max_score.max(score);
+
+                impact_scores.push(score);
+            }
 
             let max_score = max_score.to_be_bytes();
 
+            let doc_ids: Vec<_> = compress(&doc_ids).flat_map(u32::to_be_bytes).collect();
+            let impact_scores: Vec<_> = compress(&impact_scores)
+                .flat_map(u32::to_be_bytes)
+                .collect();
+
+            let posting_count = (entry.postings.len() as u32).to_be_bytes();
+            let doc_ids_len = (doc_ids.len() as u32).to_be_bytes();
+            let scores_len = (impact_scores.len() as u32).to_be_bytes();
+
+            let block_len = posting_count.len()
+                + doc_ids_len.len()
+                + scores_len.len()
+                + doc_ids.len()
+                + impact_scores.len();
+
+            self.writer.write_all(&posting_count)?;
             self.writer.write_all(&max_score)?;
+            self.writer.write_all(&doc_ids_len)?;
+            self.writer.write_all(&scores_len)?;
             self.writer.write_all(&doc_ids)?;
             self.writer.write_all(&impact_scores)?;
 
             self.lexicon.push(LexiconEntry {
                 term: entry.term,
-                offset,
-                len,
+                offset: self.current_offset,
+                len: block_len,
             });
 
-            offset += len * U32_SIZE * 2 + U32_SIZE;
+            self.current_offset += block_len;
         }
         Ok(())
     }

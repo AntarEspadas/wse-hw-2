@@ -1,4 +1,4 @@
-use crate::simple9::get_mode;
+use super::get_mode;
 
 pub fn decompress(data: &[u32]) -> Vec<u32> {
     let mut result = Vec::new();

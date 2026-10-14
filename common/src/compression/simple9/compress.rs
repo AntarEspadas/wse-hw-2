@@ -1,4 +1,4 @@
-use crate::simple9::get_mode;
+use super::get_mode;
 
 pub struct Simple9CompressIter<'a> {
     data: &'a [u32],
