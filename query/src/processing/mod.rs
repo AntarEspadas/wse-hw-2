@@ -1,6 +1,6 @@
 mod doc_score;
 
-use std::{collections::BinaryHeap, error::Error};
+use std::{cmp::Reverse, collections::BinaryHeap, error::Error};
 
 use crate::{
     index::{Index, PostingReader},
@@ -32,14 +32,13 @@ impl QueryProcessor {
         query: &str,
         t: QueryType,
         top_k: usize,
+        score_threshold: f32,
     ) -> Result<Vec<DocScore>, Box<dyn Error>> {
         let terms: Vec<_> = query.split_whitespace().flat_map(term).collect();
 
-        let mut posting_readers = self.index.get_all_postings(&terms)?;
-
         let mut heap = match t {
-            QueryType::CONJUNCTIVE => self.get_top_docs_conjunctive(&mut posting_readers),
-            QueryType::DISJUNCTIVE => panic!("Disjunctive queries not implemented"),
+            QueryType::CONJUNCTIVE => self.get_top_docs_conjunctive(&terms, score_threshold)?,
+            QueryType::DISJUNCTIVE => self.get_top_docs_disjunctive(&terms, score_threshold)?,
         };
 
         let result: Vec<_> = (0..top_k).filter_map(|_| heap.pop()).collect();
@@ -47,18 +46,25 @@ impl QueryProcessor {
     }
 
     fn get_top_docs_conjunctive(
-        &self,
-        posting_readers: &mut [PostingReader],
-    ) -> BinaryHeap<DocScore> {
+        &mut self,
+        terms: &[String],
+        score_threshold: f32,
+    ) -> Result<BinaryHeap<DocScore>, Box<dyn Error>> {
         let mut result = BinaryHeap::new();
         let mut current_doc_id = 0u32;
+
+        let mut posting_readers = self.index.get_all_postings(terms)?;
+
+        if terms.is_empty() || posting_readers.len() < terms.len() {
+            return Ok(result);
+        }
 
         posting_readers.sort_unstable_by_key(PostingReader::len);
 
         'outer: loop {
             for posting_reader in posting_readers.iter_mut() {
                 let Some(doc_id) = posting_reader.get_next_geq(current_doc_id) else {
-                    return result;
+                    return Ok(result);
                 };
 
                 if doc_id != current_doc_id {
@@ -72,12 +78,96 @@ impl QueryProcessor {
                 .map(PostingReader::get_current_score)
                 .sum();
 
-            result.push(DocScore {
-                id: current_doc_id,
-                score,
-            });
+            if score >= score_threshold {
+                result.push(DocScore {
+                    id: current_doc_id,
+                    score,
+                });
+            }
 
             current_doc_id += 1;
         }
+    }
+
+    fn get_top_docs_disjunctive(
+        &mut self,
+        terms: &[String],
+        score_threshold: f32,
+    ) -> Result<BinaryHeap<DocScore>, Box<dyn Error>> {
+        let mut result = BinaryHeap::new();
+        let mut heap = BinaryHeap::new();
+        let mut scores: Vec<DocScore> = Vec::new();
+
+        let mut essential = Vec::new();
+        let mut nonessential = Vec::new();
+
+        let mut posting_readers = self.index.get_all_postings(terms)?;
+
+        posting_readers.sort_unstable_by(|x, y| x.get_max_score().total_cmp(&y.get_max_score()));
+
+        let mut score_sum = 0f32;
+
+        for posting_reader in posting_readers {
+            score_sum += posting_reader.get_max_score();
+
+            if score_sum < score_threshold {
+                nonessential.push(posting_reader);
+            } else {
+                essential.push(posting_reader);
+            }
+        }
+
+        for (i, posting_reader) in essential.iter_mut().enumerate() {
+            if let Some(doc_id) = posting_reader.get_next_geq(0) {
+                heap.push(Reverse((doc_id, i)));
+            }
+        }
+
+        while let Some(Reverse((current_id, i))) = heap.pop() {
+            let current_score = essential[i].get_current_score();
+            if let Some(doc_score) = scores.last_mut()
+                && doc_score.id == current_id
+            {
+                doc_score.score += current_score;
+            } else {
+                scores.push(DocScore {
+                    id: current_id,
+                    score: current_score,
+                });
+            }
+            if let Some(doc_id) = essential[i].get_next_geq(current_id + 1) {
+                heap.push(Reverse((doc_id, i)));
+            }
+            // for posting_reader in essential.iter_mut() {
+            //     if let Some(doc_id) = posting_reader.get_next_geq(current_id)
+            //         && doc_id == current_id
+            //     {
+            //         score += posting_reader.get_current_score();
+            //     }
+            // }
+            // scores.push(DocScore {
+            //     id: current_id,
+            //     score,
+            // });
+            // if let Some(doc_id) = essential[i].get_next_geq(current_id + 1) {
+            //     heap.push(Reverse((doc_id, i)));
+            // }
+        }
+
+        for mut doc_score in scores {
+            for posting_reader in nonessential.iter_mut() {
+                if let Some(doc_id) = posting_reader.get_next_geq(doc_score.id)
+                    && doc_score.id == doc_id
+                {
+                    doc_score.score += posting_reader.get_current_score()
+                }
+            }
+
+            if doc_score.score >= score_threshold {
+                result.push(doc_score);
+            }
+        }
+
+        Ok(result)
     }
 }

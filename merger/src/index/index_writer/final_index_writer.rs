@@ -48,17 +48,19 @@ impl FinalIndexWriter {
     }
 
     fn write_current(&mut self) -> Result<(), Box<dyn Error>> {
+        const U32_SIZE: usize = size_of::<u32>();
+
         let mut offset = self
             .lexicon
             .last()
-            .map(|x| x.offset + x.len * size_of::<u32>() * 2)
+            .map(|x| x.offset + x.len * U32_SIZE * 2 + U32_SIZE)
             .unwrap_or(0);
         while let Some(mut entry) = self.entries.pop_front() {
             let len = entry.postings.len();
 
             entry.postings.sort_unstable_by_key(|x| x.doc_id);
 
-            let mut doc_ids: Vec<u8> = Vec::with_capacity(entry.postings.len() * size_of::<u32>());
+            let mut doc_ids: Vec<u8> = Vec::with_capacity(entry.postings.len() * U32_SIZE);
             let mut previous = 0u32;
 
             for posting in entry.postings.iter() {
@@ -68,20 +70,27 @@ impl FinalIndexWriter {
                 previous = posting.doc_id
             }
 
+            let mut max_score = 0f32;
+
             let impact_scores: Vec<_> = entry
                 .postings
                 .iter()
                 .map(|x| {
-                    bm25::pre_compute(
+                    let score = bm25::pre_compute(
                         x.doc_id,
                         x.frequency as f64,
                         entry.postings.len() as f64,
                         &self.page_table,
-                    )
+                    );
+                    max_score = max_score.max(score);
+                    score
                 })
                 .flat_map(|x| x.to_be_bytes())
                 .collect();
 
+            let max_score = max_score.to_be_bytes();
+
+            self.writer.write_all(&max_score)?;
             self.writer.write_all(&doc_ids)?;
             self.writer.write_all(&impact_scores)?;
 
@@ -91,7 +100,7 @@ impl FinalIndexWriter {
                 len,
             });
 
-            offset += len * size_of::<u32>() * 2;
+            offset += len * U32_SIZE * 2 + U32_SIZE;
         }
         Ok(())
     }

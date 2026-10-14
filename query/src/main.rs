@@ -23,7 +23,12 @@ fn find_best_new() -> Result<(), Box<dyn Error>> {
 
     let mut query_processor = QueryProcessor::new(index);
 
-    let top_results = query_processor.perform_query("the and it", QueryType::CONJUNCTIVE, 10)?;
+    let top_results = query_processor.perform_query(
+        "manhattan nyc new york",
+        QueryType::CONJUNCTIVE,
+        10,
+        5f32,
+    )?;
 
     println!("Top results: {top_results:?}");
 

@@ -7,6 +7,7 @@ pub struct Posting {
 pub struct PostingReader {
     // buffer: Vec<u8>,
     postings: Vec<Posting>,
+    max_score: f32,
     current: usize,
 }
 
@@ -14,12 +15,12 @@ impl PostingReader {
     pub fn new(buffer: Vec<u8>) -> Self {
         const U32_SIZE: usize = size_of::<u32>();
 
-        let len = buffer.len() / (U32_SIZE * 2);
+        let len = (buffer.len() - U32_SIZE) / (U32_SIZE * 2);
 
         let mut parsed_doc_ids: Vec<u32> = Vec::with_capacity(len);
         let mut accumulator = 0u32;
 
-        for chunk in buffer.as_chunks::<4>().0.iter().take(len) {
+        for chunk in buffer.as_chunks::<4>().0.iter().skip(1).take(len) {
             accumulator += u32::from_be_bytes(*chunk);
             parsed_doc_ids.push(accumulator);
         }
@@ -28,9 +29,12 @@ impl PostingReader {
             .as_chunks::<4>()
             .0
             .iter()
-            .skip(len)
+            .skip(len + 1)
             .map(|buf| f32::from_be_bytes(*buf))
             .collect();
+
+        let max_score = &buffer[..U32_SIZE];
+        let max_score = f32::from_be_bytes(max_score.try_into().unwrap());
 
         let postings: Vec<_> = parsed_doc_ids
             .into_iter()
@@ -40,6 +44,7 @@ impl PostingReader {
 
         Self {
             postings,
+            max_score,
             current: 0,
         }
     }
@@ -53,7 +58,7 @@ impl PostingReader {
             .find(|x| x.1.doc_id >= other);
 
         let Some((i, posting)) = result else {
-            self.current = self.postings.len() - 1;
+            self.current = self.postings.len();
             return None;
         };
 
@@ -63,6 +68,11 @@ impl PostingReader {
 
     pub fn get_current_score(&self) -> f32 {
         self.postings[self.current].score
+    }
+
+    #[inline(always)]
+    pub fn get_max_score(&self) -> f32 {
+        self.max_score
     }
 
     #[inline(always)]
