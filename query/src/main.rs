@@ -16,8 +16,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Reading lexicon...");
     let lexicon = Lexicon::read(lexicon_path)?;
 
-    let index = Index::open(index_path, lexicon)?;
-    let mut query_processor = QueryProcessor::new(index);
+    let index = Index::new(index_path.to_owned(), lexicon);
+    let query_processor = QueryProcessor::new(index);
 
     let mut query_type = QueryType::DISJUNCTIVE;
 

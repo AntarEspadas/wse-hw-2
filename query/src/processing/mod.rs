@@ -28,7 +28,7 @@ impl QueryProcessor {
     }
 
     pub fn perform_query(
-        &mut self,
+        &self,
         query: &str,
         t: &QueryType,
         top_k: usize,
@@ -48,7 +48,7 @@ impl QueryProcessor {
     }
 
     fn get_top_docs_conjunctive(
-        &mut self,
+        &self,
         terms: &[String],
         score_threshold: u32,
     ) -> Result<BinaryHeap<DocScore>, Box<dyn Error>> {
@@ -92,7 +92,7 @@ impl QueryProcessor {
     }
 
     fn get_top_docs_disjunctive(
-        &mut self,
+        &self,
         terms: &[String],
         score_threshold: u32,
     ) -> Result<BinaryHeap<DocScore>, Box<dyn Error>> {
