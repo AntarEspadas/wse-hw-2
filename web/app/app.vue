@@ -1,8 +1,11 @@
 <template>
   <v-app>
     <v-main>
-      <nuxt-page />
+      <NuxtLayout>
+        <nuxt-page />
+      </NuxtLayout>
     </v-main>
+
     <v-btn
       class="ma-2"
       icon="mdi-theme-light-dark"
@@ -14,5 +17,5 @@
 </template>
 
 <script lang="ts" setup>
-  //
+//
 </script>
