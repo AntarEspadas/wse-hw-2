@@ -23,4 +23,5 @@ pub struct SearchResults {
 pub struct Result {
     pub doc_id: u32,
     pub score: f32,
+    pub snippet: String,
 }
