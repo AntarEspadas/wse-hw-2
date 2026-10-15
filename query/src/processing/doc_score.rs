@@ -1,12 +1,17 @@
-#[derive(Debug)]
 pub struct DocScore {
     pub id: u32,
-    pub score: f32,
+    pub score: u32,
+}
+
+impl DocScore {
+    pub fn original_score(&self) -> f32 {
+        (self.score as f32) / 100f32 - 64f32
+    }
 }
 
 impl Ord for DocScore {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.score.total_cmp(&other.score)
+        self.score.cmp(&other.score)
     }
 }
 

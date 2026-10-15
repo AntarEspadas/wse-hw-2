@@ -1,34 +1,63 @@
+use std::collections::VecDeque;
+
 use super::get_mode;
 
-pub fn decompress(data: &[u32]) -> Vec<u32> {
-    let mut result = Vec::new();
-
-    for word in data {
-        let selector = get_selector(*word);
-        match selector {
-            0 => decompress_single::<0>(*word, &mut result),
-            1 => decompress_single::<1>(*word, &mut result),
-            2 => decompress_single::<2>(*word, &mut result),
-            3 => decompress_single::<3>(*word, &mut result),
-            4 => decompress_single::<4>(*word, &mut result),
-            5 => decompress_single::<5>(*word, &mut result),
-            6 => decompress_single::<6>(*word, &mut result),
-            7 => decompress_single::<7>(*word, &mut result),
-            8 => decompress_single::<8>(*word, &mut result),
-            _ => panic!("Invalid selector"),
-        };
-    }
-
-    result
+pub struct Simple9DecompressIter<I>
+where
+    I: Iterator<Item = u32>,
+{
+    input: I,
+    buffer: VecDeque<u32>,
 }
 
-fn decompress_single<const SELECTOR: u32>(word: u32, output: &mut Vec<u32>) {
+impl<I> Iterator for Simple9DecompressIter<I>
+where
+    I: Iterator<Item = u32>,
+{
+    type Item = u32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(result) = self.buffer.pop_front() {
+            return Some(result);
+        }
+
+        let word = self.input.next()?;
+
+        let selector = get_selector(word);
+        match selector {
+            0 => decompress_single::<0>(word, &mut self.buffer),
+            1 => decompress_single::<1>(word, &mut self.buffer),
+            2 => decompress_single::<2>(word, &mut self.buffer),
+            3 => decompress_single::<3>(word, &mut self.buffer),
+            4 => decompress_single::<4>(word, &mut self.buffer),
+            5 => decompress_single::<5>(word, &mut self.buffer),
+            6 => decompress_single::<6>(word, &mut self.buffer),
+            7 => decompress_single::<7>(word, &mut self.buffer),
+            8 => decompress_single::<8>(word, &mut self.buffer),
+            _ => panic!("Invalid selector"),
+        };
+
+        Some(self.buffer.pop_front().unwrap())
+    }
+}
+
+pub fn decompress<I>(data: I) -> Simple9DecompressIter<I::IntoIter>
+where
+    I: IntoIterator<Item = u32>,
+{
+    Simple9DecompressIter {
+        input: data.into_iter(),
+        buffer: VecDeque::with_capacity(28),
+    }
+}
+
+fn decompress_single<const SELECTOR: u32>(word: u32, output: &mut VecDeque<u32>) {
     let (n, width) = const { get_mode(SELECTOR) };
 
     let mask = (1u32 << width) - 1;
 
     for i in 0..n {
-        output.push((word >> (i * width)) & mask);
+        output.push_back((word >> (i * width)) & mask);
     }
 }
 

@@ -1,5 +1,5 @@
-mod compress;
-mod decompress;
+pub mod compress;
+pub mod decompress;
 
 pub use compress::compress;
 pub use decompress::decompress;
@@ -22,6 +22,8 @@ const fn get_mode(selector: u32) -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
+    use std::iter;
+
     use super::*;
 
     // (maximum field value, number of fields, encoded word)
@@ -38,8 +40,8 @@ mod tests {
     ];
 
     fn assert_roundtrip(data: &[u32]) {
-        let compressed: Vec<u32> = compress(data).collect();
-        let decompressed = decompress(&compressed);
+        let compressed = compress(data);
+        let decompressed: Vec<_> = decompress(compressed).collect();
 
         assert_eq!(data, &decompressed);
     }
@@ -117,7 +119,10 @@ mod tests {
 
         for value in values {
             assert_eq!(compress(&[value]).collect::<Vec<_>>(), vec![value]);
-            assert_eq!(decompress(&[value]), vec![value]);
+            assert_eq!(
+                decompress(iter::once(value)).collect::<Vec<_>>(),
+                vec![value]
+            );
         }
     }
 
@@ -138,7 +143,7 @@ mod tests {
     fn each_mode_decompresses_a_known_word() {
         for (value, count, word) in WIDTH_BOUNDARY_CASES {
             assert_eq!(
-                decompress(&[word]),
+                decompress(iter::once(word)).collect::<Vec<_>>(),
                 vec![value; count],
                 "incorrect decoding of word {word:#010x}"
             );
@@ -172,7 +177,7 @@ mod tests {
                 "incorrect packing of {data:?}"
             );
             assert_eq!(
-                decompress(&[word]).as_slice(),
+                decompress(iter::once(word)).collect::<Vec<_>>(),
                 data,
                 "incorrect field order in word {word:#010x}"
             );
@@ -201,11 +206,11 @@ mod tests {
             let data = vec![0; len];
 
             assert_eq!(
-                compress(&data).collect::<Vec<_>>().as_slice(),
+                compress(&data).collect::<Vec<_>>(),
                 words,
                 "incorrect packing for input length {len}"
             );
-            assert_eq!(decompress(words), data);
+            assert_eq!(decompress(words.iter().copied()).collect::<Vec<_>>(), data);
         }
     }
 
@@ -224,7 +229,7 @@ mod tests {
                     max_value + 1
                 );
                 assert_eq!(
-                    decompress(&compressed),
+                    decompress(compressed).collect::<Vec<_>>(),
                     data,
                     "value above {max_value} at position {position} must be preserved"
                 );
@@ -239,8 +244,8 @@ mod tests {
         data.extend_from_slice(&[1; 28]);
         let words = [0x8000_0000, 0x0fff_ffff, 0x8fff_ffff];
 
-        assert_eq!(compress(&data).collect::<Vec<_>>().as_slice(), &words);
-        assert_eq!(decompress(&words), data);
+        assert_eq!(compress(&data).collect::<Vec<_>>(), &words);
+        assert_eq!(decompress(words).collect::<Vec<_>>(), data);
     }
 
     #[test]
@@ -253,7 +258,7 @@ mod tests {
             expected.extend(std::iter::repeat_n(value, count));
         }
 
-        assert_eq!(decompress(&words), expected);
+        assert_eq!(decompress(words).collect::<Vec<_>>(), expected);
     }
 
     #[test]
@@ -261,7 +266,10 @@ mod tests {
         let cases = [(0x2800_0000, 3), (0x4e00_0000, 5), (0x6800_0000, 9)];
 
         for (word, count) in cases {
-            assert_eq!(decompress(&[word]), vec![0; count]);
+            assert_eq!(
+                decompress(iter::once(word)).collect::<Vec<_>>(),
+                vec![0; count]
+            );
         }
     }
 
@@ -287,7 +295,7 @@ mod tests {
                 let word = (selector << 28) | payload;
 
                 assert!(
-                    std::panic::catch_unwind(|| decompress(&[0x8000_0000, word])).is_err(),
+                    std::panic::catch_unwind(|| decompress([0x8000_0000, word]).collect::<Vec<_>>()).is_err(),
                     "invalid selector {selector} must be rejected"
                 );
             }

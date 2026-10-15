@@ -2,10 +2,10 @@ mod doc_score;
 
 use std::{cmp::Reverse, collections::BinaryHeap, error::Error};
 
-use crate::{
-    index::{Index, PostingReader},
-    processing::doc_score::DocScore,
-};
+use crate::index::{Index, PostingReader};
+
+pub use doc_score::DocScore;
+
 fn term(token: &str) -> Option<String> {
     let mut t = token.to_lowercase();
 
@@ -30,11 +30,13 @@ impl QueryProcessor {
     pub fn perform_query(
         &mut self,
         query: &str,
-        t: QueryType,
+        t: &QueryType,
         top_k: usize,
         score_threshold: f32,
     ) -> Result<Vec<DocScore>, Box<dyn Error>> {
         let terms: Vec<_> = query.split_whitespace().flat_map(term).collect();
+
+        let score_threshold = ((score_threshold + 64f32) * 100f32) as u32;
 
         let mut heap = match t {
             QueryType::CONJUNCTIVE => self.get_top_docs_conjunctive(&terms, score_threshold)?,
@@ -48,7 +50,7 @@ impl QueryProcessor {
     fn get_top_docs_conjunctive(
         &mut self,
         terms: &[String],
-        score_threshold: f32,
+        score_threshold: u32,
     ) -> Result<BinaryHeap<DocScore>, Box<dyn Error>> {
         let mut result = BinaryHeap::new();
         let mut current_doc_id = 0u32;
@@ -73,8 +75,8 @@ impl QueryProcessor {
                 }
             }
 
-            let score: f32 = posting_readers
-                .iter()
+            let score: u32 = posting_readers
+                .iter_mut()
                 .map(PostingReader::get_current_score)
                 .sum();
 
@@ -92,7 +94,7 @@ impl QueryProcessor {
     fn get_top_docs_disjunctive(
         &mut self,
         terms: &[String],
-        score_threshold: f32,
+        score_threshold: u32,
     ) -> Result<BinaryHeap<DocScore>, Box<dyn Error>> {
         let mut result = BinaryHeap::new();
         let mut heap = BinaryHeap::new();
@@ -103,9 +105,9 @@ impl QueryProcessor {
 
         let mut posting_readers = self.index.get_all_postings(terms)?;
 
-        posting_readers.sort_unstable_by(|x, y| x.get_max_score().total_cmp(&y.get_max_score()));
+        posting_readers.sort_unstable_by_key(PostingReader::get_max_score);
 
-        let mut score_sum = 0f32;
+        let mut score_sum = 0u32;
 
         for posting_reader in posting_readers {
             score_sum += posting_reader.get_max_score();

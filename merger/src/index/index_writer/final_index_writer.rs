@@ -77,7 +77,7 @@ impl FinalIndexWriter {
                     entry.postings.len() as f64,
                     &self.page_table,
                 );
-                let score = (score * 100f32).round() as u32;
+                let score = ((score + 64f32) * 100f32).round() as u32;
                 max_score = max_score.max(score);
 
                 impact_scores.push(score);
@@ -95,6 +95,7 @@ impl FinalIndexWriter {
             let scores_len = (impact_scores.len() as u32).to_be_bytes();
 
             let block_len = posting_count.len()
+                + max_score.len()
                 + doc_ids_len.len()
                 + scores_len.len()
                 + doc_ids.len()

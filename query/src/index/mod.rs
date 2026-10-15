@@ -59,16 +59,13 @@ impl Index {
         &mut self,
         lexicon_entry: LexiconEntry,
     ) -> Result<PostingReader, Box<dyn Error>> {
-        const U32_SIZE: usize = size_of::<u32>();
-
-        let len = lexicon_entry.len * U32_SIZE * 2 + U32_SIZE;
-        let mut buffer: Vec<u8> = Vec::with_capacity(len);
+        let mut buffer: Vec<u8> = Vec::with_capacity(lexicon_entry.len);
 
         self.file
             .seek(SeekFrom::Start(lexicon_entry.offset as u64))?;
         self.file
             .by_ref()
-            .take(len as u64)
+            .take(lexicon_entry.len as u64)
             .read_to_end(&mut buffer)?;
 
         Ok(PostingReader::new(buffer))
