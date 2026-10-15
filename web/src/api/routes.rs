@@ -7,6 +7,7 @@ use axum::{
 
 use crate::{
     api::dto::{QueryType, Result, SearchQuery, SearchResults},
+    data::documents::queries::get_documents,
     state::AppState,
 };
 
@@ -28,11 +29,17 @@ pub async fn get_search(
 
     let elapsed = end - start;
 
+    let ids: Vec<_> = results.iter().map(|x| x.id as i32).collect();
+
+    let documents = get_documents(&state.pool, &ids).await.unwrap();
+
     let results: Vec<_> = results
         .iter()
-        .map(|r| Result {
-            doc_id: r.id,
-            score: r.original_score(),
+        .zip(documents)
+        .map(|(x, y)| Result {
+            doc_id: x.id,
+            score: x.original_score(),
+            snippet: y.body,
         })
         .collect();
 
