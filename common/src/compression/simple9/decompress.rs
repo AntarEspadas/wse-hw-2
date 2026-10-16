@@ -23,19 +23,7 @@ where
 
         let word = self.input.next()?;
 
-        let selector = get_selector(word);
-        match selector {
-            0 => decompress_single::<0>(word, &mut self.buffer),
-            1 => decompress_single::<1>(word, &mut self.buffer),
-            2 => decompress_single::<2>(word, &mut self.buffer),
-            3 => decompress_single::<3>(word, &mut self.buffer),
-            4 => decompress_single::<4>(word, &mut self.buffer),
-            5 => decompress_single::<5>(word, &mut self.buffer),
-            6 => decompress_single::<6>(word, &mut self.buffer),
-            7 => decompress_single::<7>(word, &mut self.buffer),
-            8 => decompress_single::<8>(word, &mut self.buffer),
-            _ => panic!("Invalid selector"),
-        };
+        decompress_word(word, &mut self.buffer);
 
         Some(self.buffer.pop_front().unwrap())
     }
@@ -49,6 +37,22 @@ where
         input: data.into_iter(),
         buffer: VecDeque::with_capacity(28),
     }
+}
+
+pub fn decompress_word(word: u32, buffer: &mut VecDeque<u32>) {
+    let selector = get_selector(word);
+    match selector {
+        0 => decompress_single::<0>(word, buffer),
+        1 => decompress_single::<1>(word, buffer),
+        2 => decompress_single::<2>(word, buffer),
+        3 => decompress_single::<3>(word, buffer),
+        4 => decompress_single::<4>(word, buffer),
+        5 => decompress_single::<5>(word, buffer),
+        6 => decompress_single::<6>(word, buffer),
+        7 => decompress_single::<7>(word, buffer),
+        8 => decompress_single::<8>(word, buffer),
+        _ => panic!("Invalid selector"),
+    };
 }
 
 fn decompress_single<const SELECTOR: u32>(word: u32, output: &mut VecDeque<u32>) {

@@ -1,8 +1,10 @@
 pub mod compress;
 pub mod decompress;
+pub mod reader;
 
 pub use compress::compress;
 pub use decompress::decompress;
+pub use reader::Simple9Reader;
 
 #[inline(always)]
 const fn get_mode(selector: u32) -> (usize, usize) {
