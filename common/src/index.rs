@@ -1,5 +1,12 @@
+use lazy_static::lazy_static;
+use rust_stemmers::{Algorithm, Stemmer};
+
 pub const SCORE_SCALE: f32 = 100.0;
 pub const SCORE_OFFSET: f32 = 64.0;
+
+lazy_static! {
+    static ref STEMMER: Stemmer = Stemmer::create(Algorithm::English);
+}
 
 pub fn encode_score(score: f32) -> u32 {
     ((score + SCORE_OFFSET) * SCORE_SCALE).round() as u32
@@ -7,6 +14,19 @@ pub fn encode_score(score: f32) -> u32 {
 
 pub fn decode_score(score: u32) -> i64 {
     i64::from(score) - (SCORE_OFFSET * SCORE_SCALE) as i64
+}
+
+pub fn normalize(token: &str) -> Option<String> {
+    let mut t = token.to_lowercase();
+
+    // Remove punctuation
+    t.retain(|c| c.is_alphanumeric());
+
+    if t.is_empty() {
+        return None;
+    }
+
+    Some(STEMMER.stem(&t).into())
 }
 
 pub struct BlockMetadata {

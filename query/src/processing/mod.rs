@@ -41,15 +41,6 @@ impl QueryProcessor {
         Ok(result)
     }
 
-    pub fn normalize(token: &str) -> Option<String> {
-        let mut t = token.to_lowercase();
-
-        // Remove punctuation
-        t.retain(|c| c.is_alphanumeric());
-
-        if t.is_empty() { None } else { Some(t) }
-    }
-
     fn get_top_docs_conjunctive(
         &self,
         terms: &[String],

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::processing::QueryProcessor;
+use common::index::normalize;
 
 pub struct Query {
     terms: HashSet<String>,
@@ -8,10 +8,7 @@ pub struct Query {
 
 impl Query {
     pub fn new(query: &str) -> Self {
-        let terms: HashSet<_> = query
-            .split_whitespace()
-            .filter_map(QueryProcessor::normalize)
-            .collect();
+        let terms: HashSet<_> = query.split_whitespace().filter_map(normalize).collect();
 
         Self { terms }
     }
@@ -23,7 +20,7 @@ impl Query {
 
     #[inline]
     pub fn contains(&self, token: &str) -> bool {
-        let Some(term) = QueryProcessor::normalize(token) else {
+        let Some(term) = normalize(token) else {
             return false;
         };
 

@@ -4,21 +4,14 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::{iter, println, thread};
 
+use common::index::normalize;
+
 use crate::data::{Index, IndexElement, TermCounter};
 use crate::page_table::{Document, PageTable};
 
 pub mod cli;
 pub mod data;
 pub mod page_table;
-
-fn term(token: &str) -> String {
-    let mut t = token.to_lowercase();
-
-    // Remove punctuation
-    t.retain(|c| c.is_alphanumeric());
-
-    t
-}
 
 fn write_index_plaintext<'a, I>(index: I, out_path: &Path) -> Result<(), Box<dyn Error>>
 where
@@ -138,8 +131,7 @@ fn process_buffer(
         });
 
         for token in content.split_whitespace() {
-            let t = term(token);
-            if !t.is_empty() {
+            if let Some(t) = normalize(token) {
                 term_counter.count(t);
             }
         }
