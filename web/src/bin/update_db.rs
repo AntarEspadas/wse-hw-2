@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::env;
 
 use web::data::{connect_db, documents::queries::import_documents};
 
@@ -6,9 +6,9 @@ use web::data::{connect_db, documents::queries::import_documents};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
 
-    let pool = connect_db().await?;
+    let path = env::var("COLLECTION_PATH")?;
 
-    let path = Path::new("../data/collection.tsv");
+    let pool = connect_db().await?;
 
     let imported = import_documents(&pool, path).await?;
 

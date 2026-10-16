@@ -1,4 +1,4 @@
-use std::{error::Error, net::ToSocketAddrs, sync::Arc};
+use std::{env, error::Error, net::ToSocketAddrs, path::PathBuf, sync::Arc};
 
 use axum::Router;
 use query::{
@@ -12,11 +12,13 @@ use web::{api::get_api_router, data::connect_db, state::AppState};
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenvy::dotenv().ok();
 
-    let lexicon_path = std::path::Path::new("F:\\output\\lexicon.bin");
-    let index_path = std::path::Path::new("F:\\output\\index.bin");
+    let index_dir: PathBuf = env::var("INDEX_DIR")?.into();
+
+    let index_path = index_dir.join("index.bin");
+    let lexicon_path = index_dir.join("lexicon.bin");
 
     println!("Reading lexicon...");
-    let lexicon = Lexicon::read(lexicon_path)?;
+    let lexicon = Lexicon::read(&lexicon_path)?;
 
     let index = Index::new(index_path.to_owned(), lexicon);
     let query_processor = QueryProcessor::new(index);
