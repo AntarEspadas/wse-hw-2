@@ -1,22 +1,22 @@
 use clap::Parser;
-use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
 pub struct Args {
     /// Input TSV file
-    pub input: PathBuf,
+    #[arg(default_value_t = "./data/collection.tsv".to_string())]
+    pub input: String,
 
     /// Output folder for files
-    #[arg(short, long)]
-    pub out: PathBuf,
+    #[arg(short, long, default_value_t = "./output/".to_string())]
+    pub out: String,
 
     /// Number of worker threads
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = 8)]
     pub workers: usize,
 
     /// Chunk size in bytes
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = 100_000_000)]
     pub chunk_size: usize,
 
     /// Enables writing output in plaintext format
