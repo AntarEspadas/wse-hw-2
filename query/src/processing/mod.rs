@@ -1,19 +1,13 @@
 mod doc_score;
+mod query;
 
 use std::{cmp::Reverse, collections::BinaryHeap, error::Error};
 
 use crate::index::{Index, PostingReader};
 
 pub use doc_score::DocScore;
+pub use query::Query;
 
-fn term(token: &str) -> Option<String> {
-    let mut t = token.to_lowercase();
-
-    // Remove punctuation
-    t.retain(|c| c.is_alphanumeric());
-
-    if t.is_empty() { None } else { Some(t) }
-}
 pub enum QueryType {
     CONJUNCTIVE,
     DISJUNCTIVE,
@@ -29,14 +23,14 @@ impl QueryProcessor {
 
     pub fn perform_query(
         &self,
-        query: &str,
+        query: &Query,
         t: &QueryType,
         top_k: usize,
         score_threshold: f32,
     ) -> Result<Vec<DocScore>, Box<dyn Error>> {
-        let terms: Vec<_> = query.split_whitespace().flat_map(term).collect();
-
         let score_threshold = ((score_threshold + 64f32) * 100f32) as u32;
+
+        let terms: Vec<_> = query.terms().iter().cloned().collect();
 
         let mut heap = match t {
             QueryType::CONJUNCTIVE => self.get_top_docs_conjunctive(&terms, score_threshold)?,
@@ -45,6 +39,15 @@ impl QueryProcessor {
 
         let result: Vec<_> = (0..top_k).filter_map(|_| heap.pop()).collect();
         Ok(result)
+    }
+
+    pub fn normalize(token: &str) -> Option<String> {
+        let mut t = token.to_lowercase();
+
+        // Remove punctuation
+        t.retain(|c| c.is_alphanumeric());
+
+        if t.is_empty() { None } else { Some(t) }
     }
 
     fn get_top_docs_conjunctive(

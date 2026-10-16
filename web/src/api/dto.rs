@@ -15,13 +15,14 @@ pub struct SearchQuery {
 
 #[derive(Serialize)]
 pub struct SearchResults {
-    pub results: Vec<Result>,
+    pub results: Vec<DocumentResult>,
     pub time_taken: String,
 }
 
 #[derive(Serialize)]
-pub struct Result {
+pub struct DocumentResult {
     pub doc_id: u32,
     pub score: f32,
     pub snippet: String,
+    pub term_indices: Vec<usize>,
 }

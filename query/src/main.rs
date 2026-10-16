@@ -6,7 +6,7 @@ use std::{
 
 use query::{
     index::{Index, Lexicon},
-    processing::{DocScore, QueryProcessor, QueryType},
+    processing::{DocScore, Query, QueryProcessor, QueryType},
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -33,7 +33,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         } else if line == "/disjunctive" || line == "/dis" {
             query_type = QueryType::DISJUNCTIVE
         } else {
-            let results = query_processor.perform_query(&line, &query_type, 10, 5f32)?;
+            let query = Query::new(&line);
+            let results = query_processor.perform_query(&query, &query_type, 10, 5f32)?;
             show_results(&results);
         }
 
