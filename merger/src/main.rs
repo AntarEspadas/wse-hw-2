@@ -1,16 +1,16 @@
-use std::{error::Error, path::Path};
+use std::error::Error;
 
-use merger::merge;
-
-const BUFFER_SIZE: usize = 1000;
-const IN_FOLDER: &str = "F:\\output";
-// const OUT_PATH: &str = "F:\\output\\final";
-const CHUNKS: usize = 4;
+use clap::Parser;
+use merger::{cli::Args, merge};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let work_folder = Path::new(IN_FOLDER);
-
-    merge(work_folder, work_folder, CHUNKS, BUFFER_SIZE)?;
+    let args = Args::parse();
+    merge(
+        args.input_dir.as_ref(),
+        args.out.as_ref(),
+        args.input_count,
+        args.buffer_size,
+    )?;
 
     Ok(())
 }

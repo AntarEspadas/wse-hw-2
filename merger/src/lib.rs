@@ -10,16 +10,17 @@ use crate::index::{FinalIndexWriter, IndexReader, IndexWriter, IntermediateIndex
 use crate::page_table::PageTable;
 
 pub mod bm25;
+pub mod cli;
 pub mod index;
 pub mod page_table;
 
 pub fn merge(
-    work_dir: &Path,
+    in_dir: &Path,
     out_dir: &Path,
-    chunks: usize,
+    input_count: usize,
     buffer_size: usize,
 ) -> Result<(), Box<dyn Error>> {
-    let pattern = work_dir.join("index-*.bin");
+    let pattern = in_dir.join("index-*.bin");
     let pattern = pattern.to_str().unwrap();
     let mut index_paths: VecDeque<_> = glob(pattern)?
         .filter_map(Result::ok)
@@ -33,12 +34,12 @@ pub fn merge(
         .collect();
 
     for i in 0.. {
-        let input_paths: Vec<_> = index_paths.drain(..chunks).collect();
+        let input_paths: Vec<_> = index_paths.drain(..input_count).collect();
 
         if index_paths.is_empty() {
             let output_index_path = out_dir.join("index.bin");
             let output_lexicon_path = out_dir.join("lexicon.bin");
-            let page_table_path = work_dir.join("page-table.bin");
+            let page_table_path = in_dir.join("page-table.bin");
 
             let page_table = PageTable::read(&page_table_path)?;
 
@@ -56,12 +57,12 @@ pub fn merge(
             return Ok(());
         }
 
-        let output_index_path = work_dir.join(format!("merged-index-{i}.bin"));
-        let output_lexicon_path = work_dir.join(format!("merged-lexicon-{i}.bin"));
+        let output_index_path = out_dir.join(format!("merged-index-{i}.bin"));
+        let output_lexicon_path = out_dir.join(format!("merged-lexicon-{i}.bin"));
 
         let index_writer = IntermediateIndexWriter::open(&output_index_path, buffer_size)?;
 
-        println!("Pass {}: Merging {chunks} indices...", i);
+        println!("Pass {}: Merging {input_count} indices...", i);
         merge_indices(
             &input_paths,
             index_writer,
