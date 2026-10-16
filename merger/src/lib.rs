@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque};
 use std::error::Error;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use glob::glob;
@@ -20,6 +21,14 @@ pub fn merge(
     input_count: usize,
     buffer_size: usize,
 ) -> Result<(), Box<dyn Error>> {
+    if input_count == 0 || buffer_size == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "input count and buffer size must be positive",
+        )
+        .into());
+    }
+
     let pattern = in_dir.join("index-*.bin");
     let pattern = pattern.to_str().unwrap();
     let mut index_paths: VecDeque<_> = glob(pattern)?
@@ -33,8 +42,20 @@ pub fn merge(
         })
         .collect();
 
+    if index_paths.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "no partial indexes found").into());
+    }
+    if input_count == 1 && index_paths.len() > 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "merging multiple partial indexes requires an input count of at least two",
+        )
+        .into());
+    }
+
     for i in 0.. {
-        let input_paths: Vec<_> = index_paths.drain(..input_count).collect();
+        let count = input_count.min(index_paths.len());
+        let input_paths: Vec<_> = index_paths.drain(..count).collect();
 
         if index_paths.is_empty() {
             let output_index_path = out_dir.join("index.bin");

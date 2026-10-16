@@ -7,6 +7,15 @@ pub enum QueryType {
     Dis,
 }
 
+impl From<QueryType> for query::processing::QueryType {
+    fn from(value: QueryType) -> Self {
+        match value {
+            QueryType::Con => Self::CONJUNCTIVE,
+            QueryType::Dis => Self::DISJUNCTIVE,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct SearchQuery {
     pub q: String,

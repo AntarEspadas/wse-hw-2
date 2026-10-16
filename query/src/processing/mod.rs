@@ -3,6 +3,8 @@ mod query;
 
 use std::{cmp::Reverse, collections::BinaryHeap, error::Error};
 
+use common::index::{SCORE_SCALE, decode_score};
+
 use crate::index::{Index, PostingReader};
 
 pub use doc_score::DocScore;
@@ -28,8 +30,6 @@ impl QueryProcessor {
         top_k: usize,
         score_threshold: f32,
     ) -> Result<Vec<DocScore>, Box<dyn Error>> {
-        let score_threshold = ((score_threshold + 64f32) * 100f32) as u32;
-
         let terms: Vec<_> = query.terms().iter().cloned().collect();
 
         let mut heap = match t {
@@ -53,7 +53,7 @@ impl QueryProcessor {
     fn get_top_docs_conjunctive(
         &self,
         terms: &[String],
-        score_threshold: u32,
+        score_threshold: f32,
     ) -> Result<BinaryHeap<DocScore>, Box<dyn Error>> {
         let mut result = BinaryHeap::new();
         let mut current_doc_id = 0u32;
@@ -78,12 +78,12 @@ impl QueryProcessor {
                 }
             }
 
-            let score: u32 = posting_readers
+            let score: i64 = posting_readers
                 .iter_mut()
-                .map(PostingReader::get_current_score)
+                .map(|reader| decode_score(reader.get_current_score()))
                 .sum();
 
-            if score >= score_threshold {
+            if score as f32 / SCORE_SCALE >= score_threshold {
                 result.push(DocScore {
                     id: current_doc_id,
                     score,
@@ -97,7 +97,7 @@ impl QueryProcessor {
     fn get_top_docs_disjunctive(
         &self,
         terms: &[String],
-        score_threshold: u32,
+        score_threshold: f32,
     ) -> Result<BinaryHeap<DocScore>, Box<dyn Error>> {
         let mut result = BinaryHeap::new();
         let mut heap = BinaryHeap::new();
@@ -110,12 +110,14 @@ impl QueryProcessor {
 
         posting_readers.sort_unstable_by_key(PostingReader::get_max_score);
 
-        let mut score_sum = 0u32;
+        let mut score_sum = 0i64;
 
         for posting_reader in posting_readers {
-            score_sum += posting_reader.get_max_score();
+            // A document can omit this term, so zero is an upper bound when
+            // every impact in the list is negative.
+            score_sum += decode_score(posting_reader.get_max_score()).max(0);
 
-            if score_sum < score_threshold {
+            if (score_sum as f32 / SCORE_SCALE) < score_threshold {
                 nonessential.push(posting_reader);
             } else {
                 essential.push(posting_reader);
@@ -129,7 +131,7 @@ impl QueryProcessor {
         }
 
         while let Some(Reverse((current_id, i))) = heap.pop() {
-            let current_score = essential[i].get_current_score();
+            let current_score = decode_score(essential[i].get_current_score());
             if let Some(doc_score) = scores.last_mut()
                 && doc_score.id == current_id
             {
@@ -143,20 +145,6 @@ impl QueryProcessor {
             if let Some(doc_id) = essential[i].get_next_geq(current_id + 1) {
                 heap.push(Reverse((doc_id, i)));
             }
-            // for posting_reader in essential.iter_mut() {
-            //     if let Some(doc_id) = posting_reader.get_next_geq(current_id)
-            //         && doc_id == current_id
-            //     {
-            //         score += posting_reader.get_current_score();
-            //     }
-            // }
-            // scores.push(DocScore {
-            //     id: current_id,
-            //     score,
-            // });
-            // if let Some(doc_id) = essential[i].get_next_geq(current_id + 1) {
-            //     heap.push(Reverse((doc_id, i)));
-            // }
         }
 
         for mut doc_score in scores {
@@ -164,11 +152,11 @@ impl QueryProcessor {
                 if let Some(doc_id) = posting_reader.get_next_geq(doc_score.id)
                     && doc_score.id == doc_id
                 {
-                    doc_score.score += posting_reader.get_current_score()
+                    doc_score.score += decode_score(posting_reader.get_current_score());
                 }
             }
 
-            if doc_score.score >= score_threshold {
+            if doc_score.original_score() >= score_threshold {
                 result.push(doc_score);
             }
         }

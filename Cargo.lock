@@ -903,6 +903,7 @@ dependencies = [
  "clap",
  "common",
  "glob",
+ "query",
 ]
 
 [[package]]

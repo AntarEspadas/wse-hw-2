@@ -8,7 +8,7 @@ use std::{
 
 use common::{
     compression::simple9::compress,
-    index::{BlockMetadata, PostingMetadata},
+    index::{BlockMetadata, PostingMetadata, encode_score},
 };
 
 use crate::{
@@ -114,7 +114,11 @@ impl FinalIndexWriter {
         (doc_ids, last_doc_id)
     }
 
-    fn compress_impact_scores(&self, postings: &[Posting]) -> (Vec<u8>, u32) {
+    fn compress_impact_scores(
+        &self,
+        postings: &[Posting],
+        document_frequency: usize,
+    ) -> (Vec<u8>, u32) {
         let mut max_score = 0u32;
 
         let mut impact_scores = Vec::with_capacity(postings.len());
@@ -123,10 +127,10 @@ impl FinalIndexWriter {
             let score = bm25::pre_compute(
                 posting.doc_id,
                 posting.frequency as f64,
-                postings.len() as f64,
+                document_frequency as f64,
                 &self.page_table,
             );
-            let score = ((score + 64f32) * 100f32).round() as u32;
+            let score = encode_score(score);
             max_score = max_score.max(score);
 
             impact_scores.push(score);
@@ -149,9 +153,10 @@ impl FinalIndexWriter {
         let mut overall_max_score = 0u32;
         let mut compressed_scores: Vec<u8> = Vec::new();
 
-        for postings in postings.chunks(block_size) {
-            let (mut doc_ids, last_doc_id) = self.compress_doc_ids(postings);
-            let (mut scores, max_score) = self.compress_impact_scores(postings);
+        let document_frequency = postings.len();
+        for block in postings.chunks(block_size) {
+            let (mut doc_ids, last_doc_id) = self.compress_doc_ids(block);
+            let (mut scores, max_score) = self.compress_impact_scores(block, document_frequency);
 
             posting_metadata.push(PostingMetadata {
                 last_doc_id,

@@ -1,3 +1,14 @@
+pub const SCORE_SCALE: f32 = 100.0;
+pub const SCORE_OFFSET: f32 = 64.0;
+
+pub fn encode_score(score: f32) -> u32 {
+    ((score + SCORE_OFFSET) * SCORE_SCALE).round() as u32
+}
+
+pub fn decode_score(score: u32) -> i64 {
+    i64::from(score) - (SCORE_OFFSET * SCORE_SCALE) as i64
+}
+
 pub struct BlockMetadata {
     pub posting_count: u32,
     pub max_score: u32,

@@ -80,7 +80,7 @@ impl IndexReader {
 
         for _ in 0..self.buffer_size {
             let Some(entry) = self.lexicon.pop_front() else {
-                return Ok(None);
+                break;
             };
             let length = entry.len * size_of::<u32>();
             let mut doc_ids: Vec<u8> = Vec::with_capacity(length);

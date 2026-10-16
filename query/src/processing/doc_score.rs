@@ -1,11 +1,13 @@
+use common::index::SCORE_SCALE;
+
 pub struct DocScore {
     pub id: u32,
-    pub score: u32,
+    pub score: i64,
 }
 
 impl DocScore {
     pub fn original_score(&self) -> f32 {
-        (self.score as f32) / 100f32 - 64f32
+        self.score as f32 / SCORE_SCALE
     }
 }
 

@@ -51,10 +51,11 @@ impl PostingReader {
             blocks.push(posting_block);
         }
 
-        let first_block = blocks.first().unwrap();
+        let doc_ids_range = blocks.first().map_or(0..0, |block| block.doc_ids.clone());
+        let scores_range = blocks.first().map_or(0..0, |block| block.scores.clone());
 
-        let doc_ids = Simple9Reader::new(first_block.doc_ids.clone());
-        let scores = Simple9Reader::new(first_block.scores.clone());
+        let doc_ids = Simple9Reader::new(doc_ids_range);
+        let scores = Simple9Reader::new(scores_range);
 
         Self {
             len: metadata.posting_count as usize,
