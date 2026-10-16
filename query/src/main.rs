@@ -4,19 +4,28 @@ use std::{
     path::Path,
 };
 
+use clap::Parser;
 use query::{
+    cli::Args,
     index::{Index, Lexicon},
     processing::{DocScore, Query, QueryProcessor, QueryType},
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let lexicon_path = Path::new("F:\\output\\lexicon.bin");
-    let index_path = Path::new("F:\\output\\index.bin");
+    let args = Args::parse();
+
+    let index_dir = Path::new(&args.index_dir);
+
+    let index_path = index_dir.join("index.bin");
+    let lexicon_path = index_dir.join("lexicon.bin");
+
+    let top_k = args.top_results;
+    let score_threshold = args.score_threshold;
 
     println!("Reading lexicon...");
-    let lexicon = Lexicon::read(lexicon_path)?;
+    let lexicon = Lexicon::read(&lexicon_path)?;
 
-    let index = Index::new(index_path.to_owned(), lexicon);
+    let index = Index::new(index_path, lexicon);
     let query_processor = QueryProcessor::new(index);
 
     let mut query_type = QueryType::DISJUNCTIVE;
@@ -34,7 +43,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             query_type = QueryType::DISJUNCTIVE
         } else {
             let query = Query::new(&line);
-            let results = query_processor.perform_query(&query, &query_type, 10, 5f32)?;
+            let results =
+                query_processor.perform_query(&query, &query_type, top_k, score_threshold)?;
             show_results(&results);
         }
 
